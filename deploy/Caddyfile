@@ -1,0 +1,6 @@
+# Public TLS front-door for the gateway (optional --profile public).
+# Only /health, /qr, /pair-code, /disconnect and /events need to be reachable
+# from the Vercel dashboard — /messages/send stays reachable too (Bearer-authed).
+{$GATEWAY_DOMAIN} {
+	reverse_proxy gateway:8080
+}

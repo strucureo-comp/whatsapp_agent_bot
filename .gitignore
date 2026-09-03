@@ -1,0 +1,44 @@
+# Environment (prod secrets live ONLY on the server)
+.env
+.env.prod
+.env.local
+.env.*.local
+
+# Node
+node_modules/
+dist/
+**/.next/
+out/
+
+# Go
+services/gateway/bin/
+# Stray in-tree build output. `make gateway-build` writes to bin/ instead; a binary
+# sitting here is a pre-fix build waiting to be run by accident.
+services/gateway/gateway
+
+# Database
+*.db*
+*.sqlite*
+
+# Session storage (live Signal key material)
+whatsapp_sessions*
+session-store*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# pnpm
+pnpm-debug.log*
+
+# Test
+coverage/
+
+# Logs
+*.log

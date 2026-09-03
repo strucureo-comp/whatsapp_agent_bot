@@ -1,0 +1,23 @@
+[Unit]
+Description=Strucureo WhatsApp Gateway
+# Redis holds the inbound/outbound streams and Postgres holds the per-tenant
+# whatsmeow credentials; starting before either just produces a noisy first minute.
+After=network.target postgresql.service redis.service
+Wants=postgresql.service redis.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/whatsapp_agent/services/gateway
+# Built by `make gateway-build`. The gateway reads configuration from the
+# environment with os.Getenv and has no dotenv loader of its own, so without this
+# EnvironmentFile it silently falls back to its compiled-in defaults — including
+# GATEWAY_SECRET, which then 401s every daemon request with no other symptom.
+EnvironmentFile=%h/whatsapp_agent/.env
+ExecStart=%h/whatsapp_agent/services/gateway/bin/gateway
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

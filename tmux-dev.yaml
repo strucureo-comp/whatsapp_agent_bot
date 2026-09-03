@@ -1,0 +1,28 @@
+session_name: strucureo-dev
+windows:
+  - name: infra
+    panes:
+      - shell_command:
+          - brew services start postgresql@14 2>/dev/null
+          - brew services start redis 2>/dev/null
+          - sleep 2
+          - pnpm exec --filter @strucureo/agent-daemon tsx src/db/migrate.ts
+          - echo "✅ Infrastructure ready"
+  - name: gateway
+    options:
+      # Hold the pane open on a fatal exit — the crash is the thing you need to read.
+      remain-on-exit: on
+    panes:
+      # Restart loop + gateway.log; see scripts/run-gateway.sh.
+      - shell_command:
+          - ./scripts/run-gateway.sh
+  - name: daemon
+    panes:
+      - shell_command:
+          - cd services/agent-daemon
+          - pnpm daemon
+  - name: repl
+    panes:
+      - shell_command:
+          - cd services/agent-daemon
+          - pnpm repl

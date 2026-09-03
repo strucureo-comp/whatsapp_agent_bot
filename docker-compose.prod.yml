@@ -1,0 +1,110 @@
+# Strucureo production stack — sized for a 2 CPU / 2 GB Lightsail box.
+# Budget: postgres 600m + redis 300m + gateway 256m + daemon 640m ≈ 1.8 GB caps.
+# Secrets come from .env.prod (never committed). See DEPLOY.md.
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    mem_limit: 600m
+    mem_reservation: 300m
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-strucureo}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env.prod}
+      POSTGRES_DB: ${POSTGRES_DB:-strucureo}
+    command: >
+      postgres
+      -c shared_buffers=128MB
+      -c effective_cache_size=512MB
+      -c max_connections=60
+      -c work_mem=4MB
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-strucureo}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    mem_limit: 300m
+    mem_reservation: 128m
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory 200mb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  gateway:
+    build: ./services/gateway
+    restart: unless-stopped
+    mem_limit: 256m
+    mem_reservation: 64m
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      GATEWAY_PORT: 8080
+      REDIS_URL: redis://redis:6379
+      DATABASE_URL: postgresql://${POSTGRES_USER:-strucureo}:${POSTGRES_PASSWORD:?set in .env.prod}@postgres:5432/${POSTGRES_DB:-strucureo}?sslmode=disable
+      GATEWAY_SECRET: ${GATEWAY_SECRET:?set in .env.prod}
+      GATEWAY_MAX_SEND_RATE: ${GATEWAY_MAX_SEND_RATE:-5}
+    expose:
+      - "8080"
+
+  daemon:
+    build: ./services/agent-daemon
+    restart: unless-stopped
+    mem_limit: 640m
+    mem_reservation: 256m
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      gateway:
+        condition: service_started
+    env_file:
+      - .env.prod
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-strucureo}:${POSTGRES_PASSWORD:?set in .env.prod}@postgres:5432/${POSTGRES_DB:-strucureo}?sslmode=disable
+      DIRECT_DATABASE_URL: postgresql://${POSTGRES_USER:-strucureo}:${POSTGRES_PASSWORD:?set in .env.prod}@postgres:5432/${POSTGRES_DB:-strucureo}?sslmode=disable
+      REDIS_URL: redis://redis:6379
+      GATEWAY_URL: http://gateway:8080
+      AGENT_POOL_SIZE: 10
+      LOG_LEVEL: info
+
+  # Optional: public TLS front-door for the gateway so the Vercel dashboard
+  # can reach it (pairing/status). Enable with --profile public after
+  # pointing a DNS name at this box. See DEPLOY.md.
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    mem_limit: 128m
+    profiles: ["public"]
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      # Required when enabling --profile public (DEPLOY.md §0.2).
+      GATEWAY_DOMAIN: ${GATEWAY_DOMAIN:-}
+    volumes:
+      - caddydata:/data
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      - gateway
+
+volumes:
+  pgdata:
+  redisdata:
+  caddydata:

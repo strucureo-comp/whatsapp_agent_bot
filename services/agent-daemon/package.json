@@ -1,0 +1,39 @@
+{
+  "name": "@strucureo/agent-daemon",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "daemon": "tsx src/index.ts daemon",
+    "repl": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "TZ=UTC vitest --no-watch --no-cache",
+    "test:watch": "TZ=UTC vitest"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.52.0",
+    "dotenv": "^17.4.2",
+    "googleapis": "^178.0.0",
+    "groq-sdk": "^1.6.0",
+    "inquirer": "^12.6.0",
+    "ioredis": "^5.6.1",
+    "pg": "^8.16.0",
+    "pino": "^9.6.0",
+    "pino-pretty": "^13.0.0",
+    "yaml": "^2.8.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/inquirer": "^9.0.7",
+    "@types/node": "^22.15.0",
+    "@types/pg": "^8.15.4",
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.1.0"
+  }
+}
