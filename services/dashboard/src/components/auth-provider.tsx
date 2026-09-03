@@ -35,16 +35,15 @@ function Splash({ message }: { message: string }) {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const isConfigured = isFirebaseConfigured();
   const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [configError, setConfigError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(isConfigured);
+  const [configError, setConfigError] = useState<string | null>(
+    isConfigured ? null : "Firebase env missing — add NEXT_PUBLIC_FIREBASE_* to .env"
+  );
 
   useEffect(() => {
-    if (!isFirebaseConfigured()) {
-      setConfigError("Firebase env missing — add NEXT_PUBLIC_FIREBASE_* to .env");
-      setLoading(false);
-      return;
-    }
+    if (!isConfigured) return;
     let unsub: () => void = () => undefined;
     try {
       unsub = onAuthStateChanged(getFirebaseAuth(), (u) => {
@@ -52,11 +51,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setLoading(false);
       });
     } catch (err) {
-      setConfigError(err instanceof Error ? err.message : String(err));
-      setLoading(false);
+      queueMicrotask(() => {
+        setConfigError(err instanceof Error ? err.message : String(err));
+        setLoading(false);
+      });
     }
     return unsub;
-  }, []);
+  }, [isConfigured]);
 
   async function logout() {
     try {

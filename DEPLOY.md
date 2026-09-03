@@ -40,9 +40,9 @@ sudo ufw allow 22/tcp && sudo ufw --force enable
 ```bash
 git clone <repo> && cd whatsapp_agent
 cp .env.prod.example .env.prod
-# fill: POSTGRES_PASSWORD, GATEWAY_SECRET (openssl rand -hex 32),
-# GROQ_API_KEY and/or ANTHROPIC_API_KEY, GOOGLE_CLIENT_ID/SECRET,
-# GOOGLE_REDIRECT_URI=<vercel callback>
+# fill: POSTGRES_PASSWORD, GATEWAY_SECRET, CREDENTIALS_ENC_KEY (openssl rand -hex 32),
+# GOOGLE_CLIENT_ID/SECRET, GOOGLE_REDIRECT_URI=<vercel callback>
+# NOTE: LLM API keys are NOT stored in env — tenants configure them in the dashboard.
 ```
 
 ## 3. Launch
@@ -58,6 +58,7 @@ Pair WhatsApp: dashboard → WhatsApp tab (needs §0.2), or SSH + REPL.
 ```bash
 make prod-ps         # container + memory check (all mem limits ≈ 1.8 GB caps)
 make prod-down       # stop (data stays in volumes)
+make clean-test-sessions # drops whatsmeow test DBs & wipes residual test chats/queues
 ```
 
 ## 4. Vercel (dashboard)
@@ -67,6 +68,7 @@ Root directory: `services/dashboard`. Build: `pnpm build`. Env:
 | Var | Value |
 |---|---|
 | `DATABASE_URL` / `DIRECT_DATABASE_URL` | pooled PG string (managed PG recommended) |
+| `CREDENTIALS_ENC_KEY` | 64-hex char AES key (MUST MATCH server `.env.prod`) |
 | `GATEWAY_URL` | `https://gateway.strucureo.com` (or tunnel) |
 | `GATEWAY_SECRET` | same as `.env.prod` |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | same as server |

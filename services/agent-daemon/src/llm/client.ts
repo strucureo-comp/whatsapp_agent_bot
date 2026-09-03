@@ -13,8 +13,24 @@ import {
  * The tenant's llm_provider field determines which client to use.
  */
 
-export const LlmProviderSchema = z.enum(["anthropic", "groq"]);
+export const LlmProviderSchema = z.enum([
+  "anthropic", "openai", "groq", "openrouter", "together", "fireworks",
+  "gemini", "deepseek", "xai", "ollama", "custom",
+]);
 export type LlmProvider = z.infer<typeof LlmProviderSchema>;
+
+/** Default base URLs — OpenAI-compatible /chat/completions for every one. */
+export const PROVIDER_BASE_URLS: Record<string, string> = {
+  openai: "https://api.openai.com/v1",
+  groq: "https://api.groq.com/openai/v1",
+  openrouter: "https://openrouter.ai/api/v1",
+  together: "https://api.together.xyz/v1",
+  fireworks: "https://api.fireworks.ai/inference/v1",
+  gemini: "https://generativelanguage.googleapis.com/v1beta/openai",
+  deepseek: "https://api.deepseek.com/v1",
+  xai: "https://api.x.ai/v1",
+  ollama: "http://127.0.0.1:11434/v1",
+};
 
 export interface LlmMessage {
   role: "user" | "assistant" | "system";
@@ -48,13 +64,31 @@ export interface ThinkingConfig {
   budget_tokens?: number;
 }
 
+export interface LlmKeys {
+  anthropicKey?: string;
+  groqKey?: string;
+  /** Key for any non-anthropic provider (openai/openrouter/custom/…). */
+  genericKey?: string;
+  /** Tenant-set base URL; falls back to PROVIDER_BASE_URLS by provider. */
+  baseUrl?: string;
+}
+
 export class LlmClient {
   private anthropic: Anthropic;
   private groq: Groq;
+  private keys: LlmKeys;
 
-  constructor() {
-    this.anthropic = new Anthropic();
-    this.groq = new Groq();
+  constructor(keys: LlmKeys = {}) {
+    // Per-tenant BYOK first, platform env key as fallback. The SDKs read
+    // env themselves when no explicit key is passed.
+    this.anthropic = new Anthropic(
+      keys.anthropicKey ? { apiKey: keys.anthropicKey } : undefined
+    );
+    const groqOpts: { apiKey?: string; baseURL?: string } = {};
+    if (keys.groqKey) groqOpts.apiKey = keys.groqKey;
+    if (keys.baseUrl) groqOpts.baseURL = keys.baseUrl;
+    this.groq = new Groq(Object.keys(groqOpts).length > 0 ? groqOpts : undefined);
+    this.keys = keys;
   }
 
   async createMessage(
@@ -68,10 +102,15 @@ export class LlmClient {
       thinking?: ThinkingConfig;
     } = {},
   ): Promise<LlmResponse> {
+    if (provider === "anthropic") {
+      return this.createAnthropicMessage(model, messages, options);
+    }
+    // Everything else speaks OpenAI-compatible /chat/completions. Groq keeps
+    // its SDK path (it is the platform default); all others go generic.
     if (provider === "groq") {
       return this.createGroqMessage(model, messages, options);
     }
-    return this.createAnthropicMessage(model, messages, options);
+    return this.createOpenAICompatibleMessage(provider, model, messages, options);
   }
 
   private async createAnthropicMessage(
@@ -386,6 +425,164 @@ export class LlmClient {
       },
     };
   }
+
+  /**
+   * Any-provider path: OpenAI-compatible /chat/completions over plain fetch.
+   * Covers openai, openrouter, together, fireworks, gemini (OpenAI-compat
+   * endpoint), deepseek, xai, ollama and fully custom base URLs. Same tool
+   * chain as Groq: native tools → JSON-mode router → fence fallback.
+   */
+  private async createOpenAICompatibleMessage(
+    provider: LlmProvider,
+    model: string,
+    messages: LlmMessage[],
+    options: {
+      maxTokens?: number;
+      system?: string;
+      tools?: LlmTool[];
+      thinking?: ThinkingConfig;
+    } = {},
+  ): Promise<LlmResponse> {
+    const { maxTokens = 1024, system, tools } = options;
+    const base = this.keys.baseUrl?.replace(/\/+$/, "") || PROVIDER_BASE_URLS[provider];
+    if (!base) {
+      throw new Error(`No base URL for provider "${provider}" — set one in the dashboard`);
+    }
+    const apiKey = this.keys.genericKey ?? this.keys.groqKey;
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+    if (provider === "openrouter") {
+      headers["HTTP-Referer"] = "https://www.strucureo.com";
+      headers["X-Title"] = "Strucureo WhatsApp Agent";
+    }
+
+    const chatMessages = system
+      ? [{ role: "system" as const, content: system }]
+      : [];
+    for (const msg of messages) {
+      if (msg.role === "system") continue;
+      chatMessages.push({ role: msg.role as "user" | "assistant", content: msg.content });
+    }
+    const oaiTools = tools?.map((t) => ({
+      type: "function" as const,
+      function: {
+        name: t.name,
+        description: t.description,
+        parameters: t.input_schema,
+      },
+    }));
+
+    const call = async (body: Record<string, unknown>) =>
+      fetch(`${base}/chat/completions`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(90_000),
+      }).then(async (res) => {
+        if (!res.ok) {
+          const text = await res.text().catch(() => "");
+          throw new Error(`${provider} HTTP ${res.status}: ${text.slice(0, 300)}`);
+        }
+        return (await res.json()) as {
+          choices?: { message?: { content?: string; tool_calls?: { function?: { name?: string; arguments?: string } }[] } }[];
+          usage?: { prompt_tokens?: number; completion_tokens?: number };
+        };
+      });
+
+    // Attempt 1: native OpenAI-style tools.
+    if (oaiTools && oaiTools.length > 0) {
+      try {
+        const body = await call({
+          model,
+          messages: chatMessages,
+          max_tokens: maxTokens,
+          tools: oaiTools,
+        });
+        const msg = body.choices?.[0]?.message;
+        let content = msg?.content ?? "";
+        const toolCalls: LlmToolCall[] = [];
+        for (const tc of msg?.tool_calls ?? []) {
+          if (tc.function?.name) {
+            toolCalls.push({
+              name: tc.function.name,
+              input: safeParseToolArgs(tc.function.arguments ?? "{}"),
+            });
+          }
+        }
+        // Fence safety net (same as SDK paths).
+        if (oaiTools.length > 0) {
+          const fenced = parseMcpToolCall(content, oaiTools.map((t) => t.function.name));
+          if (fenced.call) {
+            content = fenced.text;
+            toolCalls.push(fenced.call);
+          }
+        }
+        return {
+          content,
+          tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
+          usage: {
+            input_tokens: body.usage?.prompt_tokens ?? 0,
+            output_tokens: body.usage?.completion_tokens ?? 0,
+          },
+        };
+      } catch (err) {
+        if (!isToolUnsupportedError(err)) throw err;
+        // fall through to router
+      }
+    }
+
+    // Attempt 2: JSON-mode router (works on json_object-capable providers).
+    const names = (tools ?? []).map((t) => t.name);
+    const toolSystem = system ?? "You are a helpful assistant.";
+    const withTools =
+      names.length > 0
+        ? toolSystem.includes(MCP_PROMPT_MARKER)
+          ? `${toolSystem}\n\n${MCP_CALL_REMINDER}`
+          : `${toolSystem}\n\n${buildMcpPrompt(tools!)}`
+        : toolSystem;
+    const routerMessages = [{ role: "system" as const, content: withTools }, ...chatMessages.slice(system ? 1 : 0)];
+    try {
+      const routed = await call({
+        model,
+        messages: routerMessages,
+        max_tokens: maxTokens,
+        temperature: 0,
+        response_format: { type: "json_object" },
+      });
+      const decision = parseRouterJson(routed.choices?.[0]?.message?.content ?? "", names);
+      if (decision && (decision.reply || decision.call)) {
+        return {
+          content: decision.reply,
+          tool_calls: decision.call ? [decision.call] : undefined,
+          usage: {
+            input_tokens: routed.usage?.prompt_tokens ?? 0,
+            output_tokens: routed.usage?.completion_tokens ?? 0,
+          },
+        };
+      }
+    } catch (err) {
+      // Router unsupported — plain completion with fence parsing.
+      void err;
+    }
+
+    // Attempt 3: plain text + fence.
+    const plain = await call({
+      model,
+      messages: names.length > 0 ? routerMessages : chatMessages,
+      max_tokens: maxTokens,
+      temperature: 0,
+    });
+    const raw = plain.choices?.[0]?.message?.content ?? "";
+    const parsed = parseMcpToolCall(raw, names);
+    return {
+      content: parsed.text,
+      tool_calls: parsed.call ? [parsed.call] : undefined,
+      usage: {
+        input_tokens: plain.usage?.prompt_tokens ?? 0,
+        output_tokens: plain.usage?.completion_tokens ?? 0,
+      },
+    };
+  }
 }
 
 /**
@@ -442,11 +639,26 @@ function safeParseToolArgs(args: string): Record<string, unknown> {
   }
 }
 
-// Singleton
-let _client: LlmClient | undefined;
-export function getLlmClient(): LlmClient {
-  if (!_client) {
-    _client = new LlmClient();
+// Small client cache keyed by credential set. 1000 tenants share platform
+// keys (1 entry); BYOK tenants get their own. FIFO-capped, never logs keys.
+const _clients = new Map<string, LlmClient>();
+
+export function getLlmClient(keys: LlmKeys = {}): LlmClient {
+  const cacheKey = `a${hashTail(keys.anthropicKey)}:g${hashTail(keys.groqKey)}:o${hashTail(keys.genericKey)}:${keys.baseUrl ?? ""}`;
+  const hit = _clients.get(cacheKey);
+  if (hit) return hit;
+  const client = new LlmClient(keys);
+  _clients.set(cacheKey, client);
+  if (_clients.size > 100) {
+    const oldest = _clients.keys().next().value;
+    if (oldest !== undefined) _clients.delete(oldest);
   }
-  return _client;
+  return client;
+}
+
+function hashTail(key: string | undefined): string {
+  if (!key) return "";
+  let h = 0;
+  for (let i = 0; i < key.length; i++) h = (Math.imul(h, 31) + key.charCodeAt(i)) | 0;
+  return `:${(h >>> 0).toString(36)}`;
 }

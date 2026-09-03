@@ -4,7 +4,8 @@ import { getPool } from "@/db/pool.js";
 import { getRecentMessages, createMessage } from "@/repos/message.js";
 import { getConversation } from "@/repos/conversation.js";
 import { getTools } from "@/repos/tool.js";
-import { getLlmClient, type LlmProvider } from "@/llm/client.js";
+import { getLlmClient, type LlmKeys, type LlmProvider } from "@/llm/client.js";
+import { getDecryptedTenantKeys, type SecretProvider } from "@/repos/secret.js";
 import { buildMcpPrompt } from "@/llm/mcp.js";
 import { classifyInput, CANNED_JAILBREAK_REPLY } from "./classifier.js";
 import { checkEscalationTriggers, escalateConversation, HOLDING_MESSAGE } from "./escalation.js";
@@ -159,10 +160,9 @@ export async function handleMessage(
   const env = getEnv();
   const pool = getPool();
   const client = await pool.connect();
-  const llm = getLlmClient();
-  // Anchor "today" to when the customer WROTE, not when we process.
-  // Overnight queues used to flip the date mid-turn (sent 11:55 PM,
-  // processed 12:05 AM → "tomorrow" moved a day).
+  // Per-tenant BYOK with platform-env fallback (1000-tenant billing model).
+  // Provider + key + base URL all come from the tenant row / tenant_secrets;
+  // only the fallBACK keys are platform env. Resolve AFTER reading the tenant.
   const anchorNow = sanitizeAnchorMs(opts?.nowMs);
   let toolFailures = 0;
   // Set only when book_meeting/cancel_meeting SUCCEED this turn — the single
@@ -393,11 +393,15 @@ export async function handleMessage(
     // Sort tool definitions by name — critical for cache hit rate
     llmTools.sort((a, b) => a.name.localeCompare(b.name));
 
-    // Determine provider and model
-    const provider: LlmProvider = tenant.llm_provider === "groq" ? "groq" : "anthropic";
+    // Determine provider, model and credentials — fully tenant-driven.
+    // Provider from the tenant row (validated by schema), key from
+    // tenant_secrets BYOK → platform env fallback, base URL optional.
+    const provider = normalizeProvider(tenant.llm_provider);
     const model = tenant.llm_model || env.DEFAULT_LLM_MODEL;
     const replyMaxTokens: number = tenant.reply_max_tokens ?? 400;
     const { thinking, maxTokens } = getModelConfig(model, replyMaxTokens);
+    const tenantKeys = await getDecryptedTenantKeys(client, tenantId);
+    const llm = getLlmClient(buildLlmKeys(provider, tenantKeys, tenant.llm_base_url));
 
     // Add today's date as context — in the BUSINESS timezone (IST), not UTC,
     // with tomorrow pre-computed so the model never does date arithmetic.
@@ -676,6 +680,36 @@ function isToolUnsupportedError(err: unknown): boolean {
 }
 
 const IST_TZ = "Asia/Kolkata";
+
+/** Map any stored provider string onto the client's provider union. */
+function normalizeProvider(raw: unknown): LlmProvider {
+  const s = String(raw ?? "").toLowerCase();
+  const known: LlmProvider[] = [
+    "anthropic", "openai", "groq", "openrouter", "together", "fireworks",
+    "gemini", "deepseek", "xai", "ollama", "custom",
+  ];
+  return (known as string[]).includes(s) ? (s as LlmProvider) : "groq";
+}
+
+/** BYOK key from tenant_secrets DB — no env fallback. */
+function buildLlmKeys(
+  provider: LlmProvider,
+  tenantKeys: Partial<Record<SecretProvider, string>>,
+  baseUrl: unknown,
+): LlmKeys {
+  const byok = tenantKeys[provider as SecretProvider];
+  const base = typeof baseUrl === "string" && /^https?:\/\//.test(baseUrl) ? baseUrl : undefined;
+  if (provider === "anthropic") {
+    return { anthropicKey: byok };
+  }
+  if (provider === "groq") {
+    return { groqKey: byok, baseUrl: base };
+  }
+  return {
+    genericKey: byok,
+    baseUrl: base,
+  };
+}
 
 function istParts(d: Date) {
   const weekday = new Intl.DateTimeFormat("en-IN", { timeZone: IST_TZ, weekday: "long" }).format(d);

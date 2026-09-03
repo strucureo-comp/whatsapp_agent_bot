@@ -3,3 +3,5 @@
 003_company_profile.sql
 004_google_tokens.sql
 005_contacts_tickets.sql
+006_tenant_secrets.sql
+007_any_llm.sql

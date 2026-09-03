@@ -10,13 +10,30 @@ const envSchema = z.object({
   DIRECT_DATABASE_URL: z.string().url(),
   REDIS_URL: z.string().url(),
   REDIS_PASSWORD: z.string().optional().default(""),
-  ANTHROPIC_API_KEY: z.string().optional().default(""),
-  GROQ_API_KEY: z.string().optional().default(""),
-  LLM_PROVIDER: z.enum(["anthropic", "groq"]).default("anthropic"),
-  DEFAULT_LLM_MODEL: z.string().default("claude-opus-5"),
+  // LLM defaults — individual tenants override via dashboard + tenant_secrets DB.
+  // NO API keys in env: keys are stored encrypted in the DB per-tenant.
+  LLM_PROVIDER: z
+    .enum([
+      "anthropic",
+      "openai",
+      "groq",
+      "openrouter",
+      "together",
+      "fireworks",
+      "gemini",
+      "deepseek",
+      "xai",
+      "ollama",
+      "custom",
+    ])
+    .default("groq"),
+  DEFAULT_LLM_MODEL: z.string().default("llama-3.3-70b-versatile"),
   GATEWAY_URL: z.string().url(),
   GATEWAY_SECRET: z.string().default("change-me-to-a-random-secret"),
-  GOOGLE_SERVICE_ACCOUNT_KEY_PATH: z.string().optional(),
+  GOOGLE_SERVICE_ACCOUNT_KEY_PATH: z.string().optional().default(""),
+  // Server-side key for encrypting tenant BYOK credentials (tenant_secrets).
+  // Generate with: openssl rand -hex 32
+  CREDENTIALS_ENC_KEY: z.string().optional().default(""),
   LOG_LEVEL: z
     .enum(["fatal", "error", "warn", "info", "debug", "trace"])
     .default("info"),

@@ -83,6 +83,7 @@ services:
       GATEWAY_URL: http://gateway:8080
       AGENT_POOL_SIZE: 10
       LOG_LEVEL: info
+      NODE_ENV: production
 
   # Optional: public TLS front-door for the gateway so the Vercel dashboard
   # can reach it (pairing/status). Enable with --profile public after

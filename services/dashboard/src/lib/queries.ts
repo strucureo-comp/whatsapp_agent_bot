@@ -21,6 +21,7 @@ export interface Tenant {
   status: "active" | "paused";
   llm_provider: string;
   llm_model: string;
+  llm_base_url?: string | null;
   staff_whatsapp: string | null;
   google_calendar_id: string | null;
   max_monthly_spend_cents: number;

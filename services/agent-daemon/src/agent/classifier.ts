@@ -42,6 +42,7 @@ export async function classifyInput(
   tenantId: string,
   conversationId: string,
   messages: Array<{ role: string; content: string }>,
+  groqKey?: string,
 ): Promise<Classification> {
   const log = getLogger();
 
@@ -51,7 +52,7 @@ export async function classifyInput(
     .join("\n");
 
   try {
-    const apiKey = process.env.GROQ_API_KEY;
+    const apiKey = groqKey ?? process.env.GROQ_API_KEY;
     const scorer = apiKey ? groqPromptGuardScorer(apiKey) : null;
     const verdict = await guardInput(userMessages, scorer);
 

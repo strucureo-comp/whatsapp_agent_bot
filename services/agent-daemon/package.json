@@ -13,7 +13,9 @@
     "repl": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
     "test": "TZ=UTC vitest --no-watch --no-cache",
-    "test:watch": "TZ=UTC vitest"
+    "test:watch": "TZ=UTC vitest",
+    "db:migrate": "tsx src/db/migrate.ts",
+    "db:clean": "tsx src/db/clean.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.52.0",

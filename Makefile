@@ -1,4 +1,4 @@
-.PHONY: setup migrate dev daemon repl test typecheck logs psql redis-cli gateway gateway-build gateway-supervised gateway-log tmux dashboard dashboard-build prod-build prod-up prod-down prod-ps prod-logs prod-public-up
+.PHONY: setup migrate clean-test-sessions dev daemon repl test typecheck logs psql redis-cli gateway gateway-build gateway-supervised gateway-log tmux dashboard dashboard-build prod-build prod-up prod-down prod-ps prod-logs prod-public-up
 
 # ─── Setup ───────────────────────────────────────────────────────────────────
 setup:
@@ -8,7 +8,10 @@ setup:
 
 # ─── Database ────────────────────────────────────────────────────────────────
 migrate:
-	cd services/agent-daemon && pnpm exec tsx src/db/migrate.ts
+	cd services/agent-daemon && pnpm db:migrate
+
+clean-test-sessions:
+	cd services/agent-daemon && pnpm db:clean
 
 # ─── Development ─────────────────────────────────────────────────────────────
 dev:

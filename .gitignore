@@ -3,6 +3,7 @@
 .env.prod
 .env.local
 .env.*.local
+sever_deploy.txt
 
 # Node
 node_modules/

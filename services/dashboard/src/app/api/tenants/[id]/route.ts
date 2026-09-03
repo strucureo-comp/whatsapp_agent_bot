@@ -8,6 +8,7 @@ const ALLOWED = new Set([
   "status",
   "llm_provider",
   "llm_model",
+  "llm_base_url",
   "staff_whatsapp",
   "google_calendar_id",
   "max_monthly_spend_cents",
