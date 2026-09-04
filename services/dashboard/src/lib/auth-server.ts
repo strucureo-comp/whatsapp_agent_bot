@@ -6,7 +6,7 @@ export async function requireAuth(): Promise<string> {
   const uid = cookieStore.get("auth_uid")?.value;
 
   if (!uid) {
-    redirect("/login");
+    return "";
   }
 
   return uid;
