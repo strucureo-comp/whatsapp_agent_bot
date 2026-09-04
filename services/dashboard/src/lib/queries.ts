@@ -113,8 +113,8 @@ export async function getOverviewStats(ownerUid: string): Promise<OverviewStats>
     pool.query(`SELECT COUNT(*)::int AS n FROM tenants WHERE owner_uid = $1`, [ownerUid]),
     pool.query(
       `SELECT
-         COUNT(*) FILTER (WHERE status = 'active')::int AS active,
-         COUNT(*) FILTER (WHERE status = 'escalated')::int AS escalated
+         COUNT(*) FILTER (WHERE c.status = 'active')::int AS active,
+         COUNT(*) FILTER (WHERE c.status = 'escalated')::int AS escalated
         FROM conversations c JOIN tenants t ON c.tenant_id = t.id
         WHERE c.is_test = false AND t.owner_uid = $1`,
       [ownerUid]
