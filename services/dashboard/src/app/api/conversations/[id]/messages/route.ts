@@ -90,15 +90,12 @@ export async function POST(
     [id, content]
   );
 
-  // 2. Update conversation snippet and count
+  // 2. Touch conversation updated_at
   await pool.query(
     `UPDATE conversations
-     SET last_snippet = $2,
-         last_message_at = NOW(),
-         message_count = message_count + 1,
-         updated_at = NOW()
+     SET updated_at = NOW()
      WHERE id = $1`,
-    [id, content.slice(0, 100)]
+    [id]
   );
 
   // 3. Send message via WhatsApp gateway

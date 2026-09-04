@@ -47,7 +47,6 @@ export function ChatThread({
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [inputText, setInputText] = useState("");
   const [sending, setSending] = useState(false);
-  const [showAttachMenu, setShowAttachMenu] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [recordDuration, setRecordDuration] = useState(0);
   const [isAtBottom, setIsAtBottom] = useState(true);
@@ -56,6 +55,7 @@ export function ChatThread({
   const scrollRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const recordTimerRef = useRef<NodeJS.Timeout | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
 
@@ -133,7 +133,6 @@ export function ChatThread({
 
     setSending(true);
     setInputText("");
-    setShowAttachMenu(false);
 
     // Optimistic message
     const tempId = `temp-${Date.now()}`;
@@ -228,6 +227,18 @@ export function ChatThread({
     }
     setIsRecording(false);
     setRecordDuration(0);
+  }
+
+  function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.type.startsWith("image/")) {
+      handleSend(`[image: ${file.name}]`);
+    } else {
+      handleSend(`[document: ${file.name}]`);
+    }
+    e.target.value = "";
   }
 
   return (
@@ -401,70 +412,22 @@ export function ChatThread({
       {/* ── Message Input Bar ─────────────────────────────────── */}
       {!isRecording && (
         <div className="shrink-0 border-t bg-white p-2.5 sm:px-4 sm:py-3 shadow-md">
-          {showAttachMenu && (
-            <div className="mb-2 flex flex-wrap gap-2 p-2 rounded-xl bg-zinc-50 border border-zinc-200 animate-in fade-in slide-in-from-bottom-2 duration-150">
-              <button
-                type="button"
-                onClick={() => {
-                  const url = prompt("Enter image URL to share (https://...):");
-                  if (url?.trim()) {
-                    handleSend(`[image: ${url.trim()}]`);
-                  }
-                }}
-                className="inline-flex items-center gap-1.5 rounded-lg border bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-100 shadow-xs"
-              >
-                <ImageIcon className="h-3.5 w-3.5 text-purple-600" />
-                Photo / Image
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const doc = prompt("Enter document title or URL (e.g., Quotation.pdf):");
-                  if (doc?.trim()) {
-                    handleSend(`[document: ${doc.trim()}]`);
-                  }
-                }}
-                className="inline-flex items-center gap-1.5 rounded-lg border bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-100 shadow-xs"
-              >
-                <FileText className="h-3.5 w-3.5 text-blue-600" />
-                Document
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const loc = prompt("Enter location address or label:");
-                  if (loc?.trim()) {
-                    handleSend(`[location: ${loc.trim()}]`);
-                  }
-                }}
-                className="inline-flex items-center gap-1.5 rounded-lg border bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-100 shadow-xs"
-              >
-                <MapPin className="h-3.5 w-3.5 text-red-600" />
-                Location
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  handleSend(`[voice message: 0:24]`);
-                }}
-                className="inline-flex items-center gap-1.5 rounded-lg border bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-100 shadow-xs"
-              >
-                <Volume2 className="h-3.5 w-3.5 text-emerald-600" />
-                Voice Note
-              </button>
-            </div>
-          )}
+          {/* Hidden Native File Input */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            className="hidden"
+            accept="image/*,.pdf,.doc,.docx,.txt,.csv,.xlsx,.mp3,.ogg,.wav"
+            onChange={handleFileSelect}
+          />
 
           <div className="flex items-end gap-2">
-            {/* Attachment Button */}
+            {/* Attachment Button - opens native file chooser */}
             <button
               type="button"
-              onClick={() => setShowAttachMenu((prev) => !prev)}
-              className={cn(
-                "flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800 transition-colors",
-                showAttachMenu && "bg-zinc-100 text-zinc-900"
-              )}
-              title="Attach media, document, voice note"
+              onClick={() => fileInputRef.current?.click()}
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800 transition-colors active:scale-95"
+              title="Attach photo or document from your device"
             >
               <Paperclip className="h-5 w-5" />
             </button>
