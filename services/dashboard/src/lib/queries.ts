@@ -376,9 +376,11 @@ export async function getTickets(ownerUid: string, opts?: { tenantId?: string; s
   }
   vals.push(opts?.limit ?? 100);
   const res = await pool.query(
-    `SELECT tk.id, tk.tenant_id, t.name AS tenant_name, tk.conversation_id, tk.customer_number, tk.customer_name,
+    `SELECT tk.id, tk.tenant_id, t.name AS tenant_name, tk.conversation_id, c.customer_number, c.customer_name,
             tk.title, tk.status, tk.priority, tk.created_at, tk.updated_at
-       FROM tickets tk JOIN tenants t ON t.id = tk.tenant_id
+       FROM tickets tk
+       JOIN tenants t ON t.id = tk.tenant_id
+       LEFT JOIN conversations c ON c.id = tk.conversation_id
        WHERE ${conds.join(" AND ")} ORDER BY tk.updated_at DESC LIMIT $${vals.length}`,
     vals,
   );
