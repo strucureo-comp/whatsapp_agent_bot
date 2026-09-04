@@ -1,6 +1,7 @@
 import { connection } from "next/server";
 import Link from "next/link";
 import { Bot, CalendarDays, ExternalLink } from "lucide-react";
+import { requireAuth } from "@/lib/auth-server";
 import { getGoogleConnection, getTenants } from "@/lib/queries";
 import { getBotBookings, listUpcomingEvents } from "@/lib/google";
 import { formatDateTime } from "@/lib/format";
@@ -26,8 +27,9 @@ export default async function CalendarPage({
   searchParams: Promise<{ tenant?: string }>;
 }) {
   await connection();
+  const uid = await requireAuth();
   const params = await searchParams;
-  const tenants = await getTenants();
+  const tenants = await getTenants(uid);
   const tenantId = params.tenant ?? tenants[0]?.id;
   const tenant = tenants.find((t) => t.id === tenantId) ?? null;
   const gconn = tenant ? await getGoogleConnection(tenant.id) : null;

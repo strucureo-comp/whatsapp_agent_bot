@@ -1,4 +1,5 @@
 import { connection } from "next/server";
+import { requireAuth } from "@/lib/auth-server";
 import { Smartphone } from "lucide-react";
 import { getTenants } from "@/lib/queries";
 import { getGatewayHealth, getSessionStatus } from "@/lib/gateway";
@@ -9,7 +10,8 @@ import { DisconnectButton, PairForm } from "@/components/pair-form";
 
 export default async function WhatsappPage() {
   await connection();
-  const [tenants, gatewayUp] = await Promise.all([getTenants(), getGatewayHealth()]);
+  const uid = await requireAuth();
+  const [tenants, gatewayUp] = await Promise.all([getTenants(uid), getGatewayHealth()]);
   const sessions = await Promise.all(
     tenants.map(async (t) => ({
       tenant: t,

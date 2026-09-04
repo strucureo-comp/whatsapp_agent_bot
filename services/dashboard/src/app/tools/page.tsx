@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { connection } from "next/server";
 import Link from "next/link";
 import { CalendarCheck, Wrench } from "lucide-react";
+import { requireAuth } from "@/lib/auth-server";
 import { getGoogleConnection, getTenants, getTools } from "@/lib/queries";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -17,18 +18,15 @@ import { PermissionBadge } from "@/components/status-badge";
 import { EmptyState } from "@/components/empty-state";
 import { cn } from "@/lib/utils";
 
-export default async function ToolsPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ tenant?: string }>;
-}) {
+export default async function ToolsPage(props: { searchParams: Promise<{ tenant?: string }> }) {
   await connection();
-  const params = await searchParams;
-  const [tools, tenants] = await Promise.all([
-    getTools(params.tenant || undefined),
-    getTenants(),
-  ]);
-  const inScope = params.tenant ? tenants.filter((t) => t.id === params.tenant) : tenants;
+  const uid = await requireAuth();
+  const params = await props.searchParams;
+  const tenantId = params.tenant;
+  const tenants = await getTenants(uid);
+  const tools = await getTools(uid, tenantId);
+
+  const inScope = tenantId ? tenants.filter((t) => t.id === tenantId) : tenants;
   const gconns = await Promise.all(inScope.map((t) => getGoogleConnection(t.id)));
   const saPath = process.env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH;
   const serviceAccount = Boolean(saPath && existsSync(saPath));

@@ -1,4 +1,5 @@
 import { connection } from "next/server";
+import { requireAuth } from "@/lib/auth-server";
 import Link from "next/link";
 import { Users } from "lucide-react";
 import { getTenants } from "@/lib/queries";
@@ -17,15 +18,24 @@ import { formatCents } from "@/components/stat-card";
 
 export default async function TenantsPage() {
   await connection();
-  const tenants = await getTenants();
+  const uid = await requireAuth();
+  const tenants = await getTenants(uid);
 
   return (
     <div className="flex flex-col gap-4">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Tenants</h1>
-        <p className="text-sm text-muted-foreground">
-          One WhatsApp number, persona and budget per tenant
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Tenants</h1>
+          <p className="text-sm text-muted-foreground">
+            One WhatsApp number, persona and budget per tenant
+          </p>
+        </div>
+        <Link
+          href="/tenants/new"
+          className="inline-flex h-9 items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+        >
+          Create New Agent
+        </Link>
       </div>
 
       <Card>
@@ -37,7 +47,7 @@ export default async function TenantsPage() {
             <EmptyState
               icon={Users}
               title="No tenants yet"
-              hint="Create one from the REPL with `tenant create`, then configure it here."
+              hint="Click 'Create New Agent' above to get started!"
             />
           ) : (
             <Table>

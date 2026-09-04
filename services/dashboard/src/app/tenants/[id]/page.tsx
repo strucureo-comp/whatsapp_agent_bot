@@ -1,7 +1,8 @@
 import { connection } from "next/server";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
+import { requireAuth } from "@/lib/auth-server";
+import { ArrowLeft, ArrowRight, Save, Trash2, Webhook } from "lucide-react";
 import { getGoogleConnection, getRecentAudit, getTenant, getTools } from "@/lib/queries";
 import { getSessionStatus } from "@/lib/gateway";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,20 +14,18 @@ import { ModelConnection } from "@/components/model-connection";
 import { GoogleCalendarCard } from "@/components/google-calendar-card";
 import { formatCents } from "@/components/stat-card";
 
-export default async function TenantDetailPage({
-  params,
-  searchParams,
-}: {
+export default async function TenantDetailPage(props: {
   params: Promise<{ id: string }>;
   searchParams: Promise<{ google?: string; reason?: string }>;
 }) {
   await connection();
-  const { id } = await params;
-  const query = await searchParams;
-  const tenant = await getTenant(id);
+  const uid = await requireAuth();
+  const { id } = await props.params;
+  const query = await props.searchParams;
+  const tenant = await getTenant(id, uid);
   if (!tenant) notFound();
   const [tools, audit, session, gconn] = await Promise.all([
-    getTools(id),
+    getTools(uid, id),
     getRecentAudit(id),
     getSessionStatus(id),
     getGoogleConnection(id),

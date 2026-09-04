@@ -2,6 +2,7 @@ import { connection } from "next/server";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
+import { requireAuth } from "@/lib/auth-server";
 import { getConversation, getMessages, getTickets } from "@/lib/queries";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -19,13 +20,14 @@ export default async function ConversationDetailPage({
   params: Promise<{ id: string }>;
 }) {
   await connection();
+  const uid = await requireAuth();
   const { id } = await params;
   const [conversation, messages] = await Promise.all([
-    getConversation(id),
-    getMessages(id),
+    getConversation(id, uid),
+    getMessages(id, uid),
   ]);
   if (!conversation) notFound();
-  const chatTickets = await getTickets({ conversationId: id });
+  const chatTickets = await getTickets(uid, { conversationId: id });
 
   return (
     <div className="flex flex-col gap-4">

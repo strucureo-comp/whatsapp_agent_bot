@@ -1,4 +1,5 @@
 import { connection } from "next/server";
+import { requireAuth } from "@/lib/auth-server";
 import Link from "next/link";
 import {
   Users,
@@ -27,10 +28,11 @@ import { Button } from "@/components/ui/button";
 
 export default async function OverviewPage() {
   await connection();
+  const uid = await requireAuth();
   const [stats, tenants, escalations, gatewayUp] = await Promise.all([
-    getOverviewStats(),
-    getTenants(),
-    getEscalations("open"),
+    getOverviewStats(uid),
+    getTenants(uid),
+    getEscalations(uid, "open"),
     getGatewayHealth(),
   ]);
   const sessions = await Promise.all(

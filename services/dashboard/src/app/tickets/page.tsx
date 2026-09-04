@@ -1,6 +1,7 @@
 import { connection } from "next/server";
 import Link from "next/link";
 import { TicketCheck } from "lucide-react";
+import { requireAuth } from "@/lib/auth-server";
 import { getTenants, getTickets } from "@/lib/queries";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -17,18 +18,16 @@ import { EmptyState } from "@/components/empty-state";
 import { TicketAdvanceButton, TicketCreateForm, TicketDeleteButton } from "@/components/ticket-controls";
 import { cn } from "@/lib/utils";
 
-export default async function TicketsPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ tenant?: string; status?: string }>;
-}) {
+export default async function TicketsPage(props: { searchParams: Promise<any> }) {
   await connection();
-  const params = await searchParams;
+  const uid = await requireAuth();
+  const params = await props.searchParams;
   const tenantId = params.tenant || undefined;
-  const status = params.status ?? "open";
+  const status = params.status && params.status !== "all" ? params.status : undefined;
+  
   const [tickets, tenants] = await Promise.all([
-    getTickets({ tenantId, status }),
-    getTenants(),
+    getTickets(uid, { tenantId, status }),
+    getTenants(uid),
   ]);
 
   const href = (patch: Record<string, string | undefined>) => {

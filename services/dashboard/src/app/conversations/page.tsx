@@ -1,6 +1,7 @@
 import { connection } from "next/server";
 import Link from "next/link";
 import { ArrowLeft, MessageCircle, Search } from "lucide-react";
+import { requireAuth } from "@/lib/auth-server";
 import { getConversation, getConversations, getMessages, getTenants, getTickets } from "@/lib/queries";
 import { formatDateTime } from "@/lib/format";
 import { Button } from "@/components/ui/button";
@@ -34,25 +35,22 @@ function keepParams(
   return `/conversations${str ? `?${str}` : ""}`;
 }
 
-export default async function ConversationsPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ tenant?: string; status?: string; test?: string; q?: string; c?: string }>;
-}) {
+export default async function ConversationsPage(props: { searchParams: Promise<any> }) {
   await connection();
-  const params = await searchParams;
+  const uid = await requireAuth();
+  const params = await props.searchParams;
   const tenantId = params.tenant || undefined;
   const status = params.status && params.status !== "all" ? params.status : undefined;
   const base = { tenant: tenantId, status: params.status, test: params.test, q: params.q };
 
-  const [conversations, tenants] = await Promise.all([
-    getConversations({ tenantId, status, includeTest: params.test === "1", search: params.q }),
-    getTenants(),
+  const [tenants, conversations] = await Promise.all([
+    getTenants(uid),
+    getConversations(uid, { tenantId, status, includeTest: params.test === "1", search: params.q }),
   ]);
 
-  const selected = params.c ? await getConversation(params.c) : null;
+  const selected = params.c ? await getConversation(params.c, uid) : null;
   const [thread, chatTickets] = selected
-    ? await Promise.all([getMessages(selected.id), getTickets({ conversationId: selected.id })])
+    ? await Promise.all([getMessages(selected.id, uid), getTickets(uid, { conversationId: selected.id })])
     : [[], []];
 
   return (

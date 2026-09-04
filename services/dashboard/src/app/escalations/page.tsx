@@ -1,6 +1,7 @@
 import { connection } from "next/server";
 import Link from "next/link";
 import { Siren } from "lucide-react";
+import { requireAuth } from "@/lib/auth-server";
 import { getEscalations } from "@/lib/queries";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -18,9 +19,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export default async function EscalationsPage() {
   await connection();
+  const uid = await requireAuth();
   const [open, resolved] = await Promise.all([
-    getEscalations("open"),
-    getEscalations("resolved"),
+    getEscalations(uid, "open"),
+    getEscalations(uid, "resolved"),
   ]);
 
   return (

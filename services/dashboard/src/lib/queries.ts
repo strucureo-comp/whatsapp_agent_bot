@@ -107,24 +107,32 @@ const SPEND_SQL = `
   ), 0)::int
 `;
 
-export async function getOverviewStats(): Promise<OverviewStats> {
+export async function getOverviewStats(ownerUid: string): Promise<OverviewStats> {
   const pool = getPool();
   const [t, c, m, e, s] = await Promise.all([
-    pool.query(`SELECT COUNT(*)::int AS n FROM tenants`),
+    pool.query(`SELECT COUNT(*)::int AS n FROM tenants WHERE owner_uid = $1`, [ownerUid]),
     pool.query(
       `SELECT
          COUNT(*) FILTER (WHERE status = 'active')::int AS active,
          COUNT(*) FILTER (WHERE status = 'escalated')::int AS escalated
-       FROM conversations WHERE is_test = false`,
+        FROM conversations c JOIN tenants t ON c.tenant_id = t.id
+        WHERE c.is_test = false AND t.owner_uid = $1`,
+      [ownerUid]
     ),
     pool.query(
-      `SELECT COUNT(*)::int AS n FROM messages WHERE created_at >= date_trunc('day', now())`,
+      `SELECT COUNT(*)::int AS n FROM messages m
+       JOIN conversations c ON c.id = m.conversation_id
+       JOIN tenants t ON c.tenant_id = t.id
+       WHERE m.created_at >= date_trunc('day', now()) AND t.owner_uid = $1`,
+      [ownerUid]
     ),
-    pool.query(`SELECT COUNT(*)::int AS n FROM escalations WHERE status = 'open'`),
+    pool.query(`SELECT COUNT(*)::int AS n FROM escalations e JOIN tenants t ON e.tenant_id = t.id WHERE e.status = 'open' AND t.owner_uid = $1`, [ownerUid]),
     pool.query(
       `SELECT ${SPEND_SQL} AS n FROM messages m
        JOIN conversations c ON c.id = m.conversation_id
-       WHERE m.created_at >= date_trunc('month', now()) AND m.role = 'assistant'`,
+       JOIN tenants t ON c.tenant_id = t.id
+       WHERE m.created_at >= date_trunc('month', now()) AND m.role = 'assistant' AND t.owner_uid = $1`,
+      [ownerUid]
     ),
   ]);
   return {
@@ -137,7 +145,7 @@ export async function getOverviewStats(): Promise<OverviewStats> {
   };
 }
 
-export async function getTenants(): Promise<Tenant[]> {
+export async function getTenants(ownerUid: string): Promise<Tenant[]> {
   const pool = getPool();
   const res = await pool.query(
     `SELECT t.*,
@@ -148,12 +156,13 @@ export async function getTenants(): Promise<Tenant[]> {
          WHERE c.tenant_id = t.id
            AND m.created_at >= date_trunc('month', now())
            AND m.role = 'assistant') AS spend_cents
-     FROM tenants t ORDER BY t.created_at ASC`,
+     FROM tenants t WHERE t.owner_uid = $1 ORDER BY t.created_at ASC`,
+    [ownerUid]
   );
   return res.rows;
 }
 
-export async function getTenant(id: string): Promise<Tenant | null> {
+export async function getTenant(id: string, ownerUid: string): Promise<Tenant | null> {
   const pool = getPool();
   const res = await pool.query(
     `SELECT t.*,
@@ -164,13 +173,13 @@ export async function getTenant(id: string): Promise<Tenant | null> {
          WHERE c.tenant_id = t.id
            AND m.created_at >= date_trunc('month', now())
            AND m.role = 'assistant') AS spend_cents
-     FROM tenants t WHERE t.id = $1`,
-    [id],
+     FROM tenants t WHERE t.id = $1 AND t.owner_uid = $2`,
+    [id, ownerUid],
   );
   return res.rows[0] ?? null;
 }
 
-export async function getConversations(opts?: {
+export async function getConversations(ownerUid: string, opts?: {
   tenantId?: string;
   status?: string;
   includeTest?: boolean;
@@ -178,8 +187,8 @@ export async function getConversations(opts?: {
   search?: string;
 }): Promise<Conversation[]> {
   const pool = getPool();
-  const conds: string[] = [];
-  const vals: unknown[] = [];
+  const conds: string[] = [`t.owner_uid = $1`];
+  const vals: unknown[] = [ownerUid];
   if (opts?.tenantId) {
     vals.push(opts.tenantId);
     conds.push(`c.tenant_id = $${vals.length}`);
@@ -202,59 +211,72 @@ export async function getConversations(opts?: {
             (SELECT MAX(m.created_at) FROM messages m WHERE m.conversation_id = c.id) AS last_message_at,
             (SELECT LEFT(m.content, 90) FROM messages m WHERE m.conversation_id = c.id
                ORDER BY m.created_at DESC LIMIT 1) AS last_snippet
-       FROM conversations c JOIN tenants t ON t.id = c.tenant_id
-       ${conds.length > 0 ? `WHERE ${conds.join(" AND ")}` : ""} ORDER BY c.updated_at DESC LIMIT $${vals.length}`,
+       FROM conversations c
+      JOIN tenants t ON c.tenant_id = t.id
+      ${conds.length ? `WHERE ${conds.join(" AND ")}` : ""} ORDER BY c.updated_at DESC LIMIT $${vals.length}`,
     vals,
   );
   return res.rows;
 }
 
-export async function getConversation(id: string): Promise<Conversation | null> {
+export async function getConversation(id: string, ownerUid: string): Promise<Conversation | null> {
   const pool = getPool();
   const res = await pool.query(
     `SELECT c.id, c.tenant_id, t.name AS tenant_name, c.customer_number, c.customer_jid,
             c.customer_name, c.contact_tag, c.notes,
             c.status, c.is_test, c.updated_at,
             (SELECT COUNT(*)::int FROM messages m WHERE m.conversation_id = c.id) AS message_count,
-            (SELECT MAX(m.created_at) FROM messages m WHERE m.conversation_id = c.id) AS last_message_at
+            (SELECT MAX(m.created_at) FROM messages m WHERE m.conversation_id = c.id) AS last_message_at,
+            (SELECT LEFT(m.content, 90) FROM messages m WHERE m.conversation_id = c.id
+               ORDER BY m.created_at DESC LIMIT 1) AS last_snippet
        FROM conversations c JOIN tenants t ON t.id = c.tenant_id
-      WHERE c.id = $1`,
-    [id],
+       WHERE c.id = $1 AND t.owner_uid = $2`,
+    [id, ownerUid],
   );
   return res.rows[0] ?? null;
 }
 
-export async function getMessages(conversationId: string, limit = 200): Promise<Message[]> {
+export async function getMessages(conversationId: string, ownerUid: string): Promise<Message[]> {
   const pool = getPool();
+  const check = await pool.query(`SELECT 1 FROM conversations c JOIN tenants t ON c.tenant_id = t.id WHERE c.id = $1 AND t.owner_uid = $2`, [conversationId, ownerUid]);
+  if (check.rows.length === 0) return [];
   const res = await pool.query(
-    `SELECT id, conversation_id, wa_message_id, role, content, usage_json, created_at
-       FROM messages WHERE conversation_id = $1
-       ORDER BY created_at ASC LIMIT $2`,
-    [conversationId, limit],
+    `SELECT m.id, m.conversation_id, m.wa_message_id, m.role, m.content, m.usage_json, m.created_at
+       FROM messages m WHERE m.conversation_id = $1 ORDER BY m.created_at ASC`,
+    [conversationId],
   );
   return res.rows;
 }
 
-export async function getEscalations(status: "open" | "resolved" | "all" = "open"): Promise<Escalation[]> {
+export async function getEscalations(ownerUid: string, status?: "open" | "resolved"): Promise<Escalation[]> {
   const pool = getPool();
-  const where = status === "all" ? "" : "WHERE e.status = $1";
-  const vals = status === "all" ? [] : [status];
-  const res = await pool.query(
-    `SELECT e.id, e.conversation_id, e.tenant_id, t.name AS tenant_name,
-            c.customer_number, e.reason, e.summary, e.status, e.created_at, e.resolved_at
-       FROM escalations e
-       JOIN tenants t ON t.id = e.tenant_id
-       JOIN conversations c ON c.id = e.conversation_id
-       ${where} ORDER BY e.created_at DESC LIMIT 100`,
-    vals,
-  );
+  let query = `
+    SELECT e.id, e.conversation_id, e.tenant_id, t.name AS tenant_name,
+           c.customer_number, e.reason, e.summary, e.status, e.created_at, e.resolved_at
+    FROM escalations e
+    JOIN tenants t ON e.tenant_id = t.id
+    JOIN conversations c ON c.id = e.conversation_id
+    WHERE t.owner_uid = $1
+  `;
+  const vals: unknown[] = [ownerUid];
+  
+  if (status) {
+    vals.push(status);
+    query += ` AND e.status = $2`;
+  }
+  query += ` ORDER BY e.created_at DESC LIMIT 100`;
+  const res = await pool.query(query, vals);
   return res.rows;
 }
 
-export async function getTools(tenantId?: string): Promise<(TenantTool & { tenant_name: string })[]> {
+export async function getTools(ownerUid: string, tenantId?: string): Promise<(TenantTool & { tenant_name: string })[]> {
   const pool = getPool();
-  const where = tenantId ? "WHERE tt.tenant_id = $1" : "";
-  const vals = tenantId ? [tenantId] : [];
+  let where = "WHERE t.owner_uid = $1";
+  const vals: unknown[] = [ownerUid];
+  if (tenantId) {
+    vals.push(tenantId);
+    where += " AND tt.tenant_id = $2";
+  }
   const res = await pool.query(
     `SELECT tt.id, tt.tenant_id, t.name AS tenant_name, tt.name, tt.description,
             tt.endpoint, tt.permission, tt.timeout_ms, tt.rate_limit_per_min, tt.enabled
@@ -336,28 +358,35 @@ export interface Ticket {
   updated_at: string;
 }
 
-export async function getTickets(opts?: {
-  tenantId?: string;
-  status?: string;
-  conversationId?: string;
-  limit?: number;
-}): Promise<Ticket[]> {
+export async function getTickets(ownerUid: string, opts?: { tenantId?: string; status?: string; conversationId?: string; limit?: number }): Promise<Ticket[]> {
   const pool = getPool();
-  const conds: string[] = [];
-  const vals: unknown[] = [];
+  const conds: string[] = ["t.owner_uid = $1"];
+  const vals: unknown[] = [ownerUid];
   if (opts?.tenantId) {
     vals.push(opts.tenantId);
-    conds.push(`k.tenant_id = $${vals.length}`);
+    conds.push(`tk.tenant_id = $${vals.length}`);
   }
-  if (opts?.status && opts.status !== "all") {
+  if (opts?.status) {
     vals.push(opts.status);
-    conds.push(`k.status = $${vals.length}`);
+    conds.push(`tk.status = $${vals.length}`);
   }
   if (opts?.conversationId) {
     vals.push(opts.conversationId);
-    conds.push(`k.conversation_id = $${vals.length}`);
+    conds.push(`tk.conversation_id = $${vals.length}`);
   }
   vals.push(opts?.limit ?? 100);
+  const res = await pool.query(
+    `SELECT tk.id, tk.tenant_id, t.name AS tenant_name, tk.conversation_id, tk.customer_number, tk.customer_name,
+            tk.title, tk.status, tk.priority, tk.created_at, tk.updated_at
+       FROM tickets tk JOIN tenants t ON t.id = tk.tenant_id
+       WHERE ${conds.join(" AND ")} ORDER BY tk.updated_at DESC LIMIT $${vals.length}`,
+    vals,
+  );
+  return res.rows;
+}
+
+export async function getTicket(ownerUid: string, id: string): Promise<Ticket | null> {
+  const pool = getPool();
   const res = await pool.query(
     `SELECT k.id, k.tenant_id, t.name AS tenant_name, k.conversation_id,
             c.customer_number, c.customer_name, k.title, k.status, k.priority,
@@ -365,11 +394,10 @@ export async function getTickets(opts?: {
        FROM tickets k
        JOIN tenants t ON t.id = k.tenant_id
        LEFT JOIN conversations c ON c.id = k.conversation_id
-       ${conds.length > 0 ? `WHERE ${conds.join(" AND ")}` : ""}
-       ORDER BY k.updated_at DESC LIMIT $${vals.length}`,
-    vals,
+       WHERE k.id = $1 AND t.owner_uid = $2`,
+    [id, ownerUid]
   );
-  return res.rows;
+  return res.rows[0] ?? null;
 }
 
 export async function getTicketCounts(tenantId?: string): Promise<Record<string, number>> {

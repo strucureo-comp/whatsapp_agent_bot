@@ -48,6 +48,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       unsub = onAuthStateChanged(getFirebaseAuth(), (u) => {
         setUser(u);
+        if (u) {
+          document.cookie = `auth_uid=${u.uid}; path=/; max-age=86400; samesite=lax`;
+        } else {
+          document.cookie = `auth_uid=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT`;
+        }
         setLoading(false);
       });
     } catch (err) {
@@ -61,6 +66,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function logout() {
     try {
+      document.cookie = `auth_uid=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT`;
       await signOut(getFirebaseAuth());
     } catch {
       // already out — nothing to do
