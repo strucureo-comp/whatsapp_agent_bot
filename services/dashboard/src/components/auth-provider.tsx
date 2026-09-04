@@ -85,9 +85,9 @@ export function AuthShell({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (loading || configError) return;
-    if (!user && !isPublic) router.replace("/login");
-    if (user && isPublic) router.replace("/");
-  }, [user, loading, configError, isPublic, router]);
+    if (!user && !isPublic) window.location.href = "/login";
+    if (user && isPublic) window.location.href = "/";
+  }, [user, loading, configError, isPublic]);
 
   if (loading) return <Splash message="Signing you in…" />;
   if (configError) return <Splash message={configError} />;
