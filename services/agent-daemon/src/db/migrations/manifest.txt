@@ -1,5 +1,6 @@
 001_initial_schema.sql
 002_rls_policies.sql
+002_add_owner_uid.sql
 003_company_profile.sql
 004_google_tokens.sql
 005_contacts_tickets.sql
