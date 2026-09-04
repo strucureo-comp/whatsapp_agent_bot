@@ -112,13 +112,30 @@ export async function createEventOAuth(
 }
 
 /**
- * Propose 2-3 available slots given busy times.
+ * Format a Date or timestamp as an ISO string with +05:30 IST offset.
+ */
+export function toISTISO(dateOrMs: Date | number | string): string {
+  const d = new Date(dateOrMs);
+  const istTime = new Date(d.getTime() + 330 * 60 * 1000);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const y = istTime.getUTCFullYear();
+  const m = pad(istTime.getUTCMonth() + 1);
+  const day = pad(istTime.getUTCDate());
+  const h = pad(istTime.getUTCHours());
+  const min = pad(istTime.getUTCMinutes());
+  const s = pad(istTime.getUTCSeconds());
+  return `${y}-${m}-${day}T${h}:${min}:${s}+05:30`;
+}
+
+/**
+ * Propose available slots given busy times within [timeMin, timeMax].
  */
 export function proposeSlots(
   busy: Array<{ start: string; end: string }>,
   timeMin: string,
   timeMax: string,
   durationMinutes: number = 30,
+  maxSlots: number = 50,
 ): TimeSlot[] {
   const slots: TimeSlot[] = [];
   const durationMs = durationMinutes * 60 * 1000;
@@ -126,10 +143,11 @@ export function proposeSlots(
   let current = new Date(timeMin).getTime();
   const end = new Date(timeMax).getTime();
 
-  while (current + durationMs <= end && slots.length < 3) {
+  // Step in 30-min increments or durationMinutes (whichever is smaller)
+  const stepMs = Math.min(durationMs, 30 * 60 * 1000);
+
+  while (current + durationMs <= end && slots.length < maxSlots) {
     const slotEnd = current + durationMs;
-    const slotStart = new Date(current).toISOString();
-    const slotEndISO = new Date(slotEnd).toISOString();
 
     // Check if slot overlaps with any busy time
     const overlaps = busy.some((b) => {
@@ -139,10 +157,13 @@ export function proposeSlots(
     });
 
     if (!overlaps) {
-      slots.push({ start: slotStart, end: slotEndISO });
+      slots.push({
+        start: toISTISO(current),
+        end: toISTISO(slotEnd),
+      });
     }
 
-    current = slotEnd;
+    current += stepMs;
   }
 
   return slots;

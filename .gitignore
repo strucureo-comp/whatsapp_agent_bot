@@ -43,3 +43,4 @@ coverage/
 
 # Logs
 *.log
+.vercel

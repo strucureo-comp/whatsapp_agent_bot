@@ -3,11 +3,37 @@ import { google } from "googleapis";
 import type pg from "pg";
 import { getLogger } from "@/lib/logger.js";
 import { getOAuthClientForTenant } from "./google-auth.js";
-import { getFreeBusyOAuth, createEventOAuth, getFreeBusy, createEvent, proposeSlots } from "./calendar.js";
+import { getFreeBusyOAuth, createEventOAuth, getFreeBusy, createEvent, proposeSlots, toISTISO, type TimeSlot } from "./calendar.js";
 import { SlotManager } from "@/agent/slots.js";
 import { getSharedRedis } from "@/agent/handle-message.js";
 
 export const CALENDAR_TOOL_NAMES = ["check_availability", "book_meeting", "cancel_meeting"] as const;
+
+/** Parse preferred time string into HH:mm format (e.g. '17:00', '5pm', '5:00 PM', '10:30 am') */
+export function parsePreferredTime(str?: unknown): string | null {
+  if (!str || typeof str !== "string") return null;
+  const s = str.trim().toLowerCase();
+  const m12 = s.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)$/);
+  if (m12) {
+    let h = parseInt(m12[1], 10);
+    const m = m12[2] ? parseInt(m12[2], 10) : 0;
+    const meridiem = m12[3];
+    if (meridiem === "pm" && h < 12) h += 12;
+    if (meridiem === "am" && h === 12) h = 0;
+    if (h >= 0 && h < 24 && m >= 0 && m < 60) {
+      return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+    }
+  }
+  const m24 = s.match(/^(\d{1,2}):(\d{2})$/);
+  if (m24) {
+    const h = parseInt(m24[1], 10);
+    const m = parseInt(m24[2], 10);
+    if (h >= 0 && h < 24 && m >= 0 && m < 60) {
+      return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+    }
+  }
+  return null;
+}
 
 /** "Fri, 05 Sep, 12:00 PM IST" — pre-formatted so the model quotes instead of converting. */
 export function fmtIST(iso: string): string {
@@ -117,13 +143,17 @@ export function calendarToolDefinitions(): Array<{
     {
       name: "check_availability",
       description:
-        "Check the business calendar for a day. Returns what's ALREADY booked plus 2-3 free, held slots. Call BEFORE proposing any time. If the request lacks a date or AM/PM (e.g. just '6:30'), ask ONE short clarifying question first instead of guessing — then call with the answer.",
+        "Check the business calendar for a day. Returns what's ALREADY booked plus free, held slots. Accepts an optional preferred_time (e.g. '17:00' or '5pm') to check and prioritize a specific time. Call BEFORE proposing or booking any time. If the customer requested a time (e.g. '6 sept - 5pm'), pass both date and preferred_time.",
       input_schema: {
         type: "object",
         properties: {
           date: {
             type: "string",
             description: "Day to check, YYYY-MM-DD (Asia/Kolkata). Defaults to tomorrow.",
+          },
+          preferred_time: {
+            type: "string",
+            description: "Optional preferred time (e.g. '17:00', '5pm', '10:30'). Checks and holds this specific time if available.",
           },
           duration_minutes: { type: "number", description: "Meeting length. Default 30." },
           work_start: { type: "string", description: "Earliest HH:mm IST, default 09:00." },
@@ -136,13 +166,13 @@ export function calendarToolDefinitions(): Array<{
     {
       name: "book_meeting",
       description:
-        "Create the calendar event. Call ONLY after the customer confirmed one of the check_availability slots (or gave an exact time you re-checked). Never invent confirmations — use this tool.",
+        "Create the calendar event on Google Calendar. Call ONLY after the customer confirmed a time (or explicitly requested to book). Use the exact start and end ISO strings from check_availability. Never invent confirmations — use this tool.",
       input_schema: {
         type: "object",
         properties: {
-          title: { type: "string", description: "Event title, e.g. 'Call with Priya'." },
-          start: { type: "string", description: "ISO start, e.g. 2026-09-05T12:00:00+05:30." },
-          end: { type: "string", description: "ISO end." },
+          title: { type: "string", description: "Event title, e.g. 'Call with Priya' or 'Consultation'." },
+          start: { type: "string", description: "ISO start, e.g. 2026-09-06T17:00:00+05:30." },
+          end: { type: "string", description: "ISO end, e.g. 2026-09-06T17:30:00+05:30." },
           attendee_email: { type: "string", description: "Customer email for the invite, if known." },
           description: { type: "string", description: "Notes on the event." },
         },
@@ -170,17 +200,17 @@ export function calendarToolDefinitions(): Array<{
   ];
 }
 
-function dayWindowIST(date?: string): { timeMin: string; timeMax: string } {
-  const base = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null;
+function dayWindowIST(date?: string): { day: string; timeMin: string; timeMax: string } {
   let day: string;
-  if (base) {
-    day = base;
+  const match = typeof date === "string" ? date.trim().match(/^(\d{4})-(\d{1,2})-(\d{1,2})/) : null;
+  if (match) {
+    day = `${match[1]}-${match[2].padStart(2, "0")}-${match[3].padStart(2, "0")}`;
   } else {
     const ist = new Date(Date.now() + (330 + new Date().getTimezoneOffset()) * 60_000);
     ist.setDate(ist.getDate() + 1);
     day = ist.toISOString().slice(0, 10);
   }
-  return { timeMin: `${day}T00:00:00+05:30`, timeMax: `${day}T23:59:59+05:30` };
+  return { day, timeMin: `${day}T00:00:00+05:30`, timeMax: `${day}T23:59:59+05:30` };
 }
 
 export async function runCheckAvailability(
@@ -193,7 +223,7 @@ export async function runCheckAvailability(
     typeof input.duration_minutes === "number" && input.duration_minutes > 0
       ? Math.min(480, Math.floor(input.duration_minutes))
       : 30;
-  const { timeMin, timeMax } =
+  const { day, timeMin, timeMax } =
     typeof input.date === "string" && input.date
       ? dayWindowIST(input.date)
       : dayWindowIST(undefined);
@@ -214,8 +244,11 @@ export async function runCheckAvailability(
       ? already.map((e) => `- "${e.title}" at ${fmtIST(e.start)}`).join("\n")
       : "(nothing scheduled that day)";
 
-  // Business hours only (IST) — midnight slots are never useful and only
-  // cause cross-customer hold collisions on the same first-free chunk.
+  const alreadyBlock =
+    `Already on the calendar that day:\n${alreadyLines}\n` +
+    `Present both: what exists first, then the free options.`;
+
+  // Business hours only (IST)
   const workStart =
     typeof input.work_start === "string" && /^\d{2}:\d{2}$/.test(input.work_start)
       ? input.work_start
@@ -224,32 +257,109 @@ export async function runCheckAvailability(
     typeof input.work_end === "string" && /^\d{2}:\d{2}$/.test(input.work_end)
       ? input.work_end
       : "18:00";
-  const inHours = (iso: string) => {
-    const istHour =
-      (new Date(iso).getTime() + 330 * 60_000) % 86_400_000 / 3_600_000;
-    const [sh, sm] = workStart.split(":").map(Number);
-    const [eh, em] = workEnd.split(":").map(Number);
-    const t = istHour;
-    return t >= sh + sm / 60 && t + duration / 60 <= eh + em / 60;
-  };
-  const candidates = proposeSlots(busy, timeMin, timeMax, duration).filter((s) =>
-    inHours(s.start),
-  );
-  const alreadyBlock =
-    `Already on the calendar that day:\n${alreadyLines}\n` +
-    `Present both: what exists first, then the free options.`;
-  if (candidates.length === 0) {
+
+  const workStartMs = new Date(`${day}T${workStart}:00+05:30`).getTime();
+  const workEndMs = new Date(`${day}T${workEnd}:00+05:30`).getTime();
+  const nowMs = Date.now();
+
+  // If checking today (or past), don't propose past slots. Keep at least 15 min buffer.
+  const searchStartMs = Math.max(workStartMs, nowMs + 15 * 60 * 1000);
+
+  if (searchStartMs + duration * 60 * 1000 > workEndMs) {
+    return {
+      content: `No free slots remaining on ${day} between ${workStart}–${workEnd} IST (working hours have ended or insufficient time remains today). ${alreadyBlock} Please ask the customer for another date.`,
+      is_error: false,
+    };
+  }
+
+  // Scan free slots in the business window
+  const searchMinISO = toISTISO(searchStartMs);
+  const searchMaxISO = toISTISO(workEndMs);
+  const allFreeSlots = proposeSlots(busy, searchMinISO, searchMaxISO, duration, 50);
+
+  if (allFreeSlots.length === 0) {
     return {
       content: `No free slots that day between ${workStart}–${workEnd} IST. ${alreadyBlock} Ask for another date.`,
       is_error: false,
     };
   }
-  const held = await new SlotManager(getSharedRedis()).proposeSlots(
+
+  // Check preferred_time if requested
+  const prefTime = parsePreferredTime(input.preferred_time);
+  let preferredSlot: TimeSlot | null = null;
+  let prefStatusNote = "";
+
+  if (prefTime) {
+    const prefStartMs = new Date(`${day}T${prefTime}:00+05:30`).getTime();
+    const prefEndMs = prefStartMs + duration * 60 * 1000;
+
+    if (prefStartMs < searchStartMs || prefEndMs > workEndMs) {
+      prefStatusNote = `Requested time ${prefTime} IST is outside available business hours (${workStart}–${workEnd} IST) or in the past.\n`;
+    } else {
+      const clash = busy.some((b) => {
+        const bStart = new Date(b.start).getTime();
+        const bEnd = new Date(b.end).getTime();
+        return prefStartMs < bEnd && prefEndMs > bStart;
+      });
+
+      if (clash) {
+        prefStatusNote = `Requested time ${prefTime} IST is already booked.\n`;
+      } else {
+        preferredSlot = {
+          start: toISTISO(prefStartMs),
+          end: toISTISO(prefEndMs),
+        };
+        prefStatusNote = `Requested time ${prefTime} IST on ${day} is AVAILABLE!\n`;
+      }
+    }
+  }
+
+  // Assemble candidate slots for customer hold (up to 4 slots)
+  const candidateMap = new Map<string, TimeSlot>();
+  if (preferredSlot) {
+    candidateMap.set(preferredSlot.start, preferredSlot);
+  }
+
+  // Distribute other free slots across the day (morning, midday, afternoon, late afternoon)
+  const targetCount = preferredSlot ? 4 : 4;
+  if (allFreeSlots.length <= targetCount) {
+    for (const s of allFreeSlots) {
+      candidateMap.set(s.start, s);
+    }
+  } else {
+    const step = (allFreeSlots.length - 1) / (targetCount - 1);
+    for (let i = 0; i < targetCount; i++) {
+      const idx = Math.round(i * step);
+      const s = allFreeSlots[idx];
+      if (s) candidateMap.set(s.start, s);
+    }
+  }
+  if (allFreeSlots[0]) {
+    candidateMap.set(allFreeSlots[0].start, allFreeSlots[0]);
+  }
+
+  const candidateSlots = Array.from(candidateMap.values());
+
+  const slotManager = new SlotManager(getSharedRedis());
+  let held = await slotManager.proposeSlots(
     tenantId,
     conversationId,
     ctx.calendarId,
-    candidates,
+    candidateSlots,
   );
+
+  // If held slots were taken by another customer, backfill from remaining free slots
+  if (held.length < 2 && allFreeSlots.length > candidateSlots.length) {
+    const unheld = allFreeSlots.filter((s) => !candidateMap.has(s.start));
+    const moreHeld = await slotManager.proposeSlots(
+      tenantId,
+      conversationId,
+      ctx.calendarId,
+      unheld.slice(0, 5),
+    );
+    held = [...held, ...moreHeld];
+  }
+
   if (held.length === 0) {
     return {
       content:
@@ -258,17 +368,20 @@ export async function runCheckAvailability(
       is_error: false,
     };
   }
+
   // Pre-formatted IST labels — quote these EXACTLY, never convert timezones.
   const lines = held
     .map((s) => `- ${fmtIST(s.start)} – ${fmtIST(s.end)} [book with start=${s.start} end=${s.end}]`)
     .join("\n");
   const anchor = todayTomorrowIST();
+
   return {
     content:
       `Today is ${anchor.today}. Tomorrow is ${anchor.tomorrow}.\n` +
-      `Already on the calendar that day:\n${alreadyLines}\n` +
-      `Free slots ${workStart}–${workEnd} IST (held for this customer, quote times exactly as shown):\n${lines}\n` +
-      `Present both: what exists first, then the free options.`,
+      (prefStatusNote ? `${prefStatusNote}\n` : "") +
+      `Already on the calendar that day:\n${alreadyLines}\n\n` +
+      `Free slots ${workStart}–${workEnd} IST (held for this customer, quote times exactly as shown):\n${lines}\n\n` +
+      `Present both: what exists first (if any), then the free options. If the customer requests or confirms one, call book_meeting.`,
     is_error: false,
   };
 }
@@ -291,7 +404,13 @@ export async function runBookMeeting(
   const busy = ctx.oauth
     ? (await getFreeBusyOAuth(ctx.oauth, ctx.calendarId, start, end)).busy
     : (await getFreeBusy(ctx.calendarId, start, end, ctx.serviceCreds!)).busy;
-  const clash = busy.some((b) => b.start < end && b.end > start);
+  const startMs = new Date(start).getTime();
+  const endMs = new Date(end).getTime();
+  const clash = busy.some((b) => {
+    const bStart = new Date(b.start).getTime();
+    const bEnd = new Date(b.end).getTime();
+    return bStart < endMs && bEnd > startMs;
+  });
   if (clash) {
     return {
       content: "That time just became unavailable. Run check_availability again for fresh slots.",

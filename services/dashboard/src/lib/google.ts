@@ -103,6 +103,111 @@ export async function listUpcomingEvents(
   return { events };
 }
 
+export interface AvailableSlot {
+  time: string;
+  label: string;
+  start: string;
+  end: string;
+}
+
+export async function getCalendarFreeSlots(
+  tenantId: string,
+  date: string,
+  durationMinutes = 30
+): Promise<{ slots: AvailableSlot[]; error?: string }> {
+  const token = await getValidAccessToken(tenantId);
+  if (!token) return { slots: [], error: "Google account not connected" };
+  const calendarId = await calendarIdFor(tenantId);
+
+  const timeMin = `${date}T00:00:00+05:30`;
+  const timeMax = `${date}T23:59:59+05:30`;
+
+  const res = await fetch("https://www.googleapis.com/calendar/v3/freeBusy", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      timeMin,
+      timeMax,
+      items: [{ id: calendarId }],
+    }),
+    signal: AbortSignal.timeout(15000),
+    cache: "no-store",
+  });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    return { slots: [], error: body?.error?.message ?? `Google HTTP ${res.status}` };
+  }
+
+  const body = await res.json().catch(() => ({}));
+  const busyList: Array<{ start: string; end: string }> =
+    body?.calendars?.[calendarId]?.busy ?? [];
+
+  // Business hours: 09:00 to 18:00 IST
+  const workStartMs = new Date(`${date}T09:00:00+05:30`).getTime();
+  const workEndMs = new Date(`${date}T18:00:00+05:30`).getTime();
+  const durationMs = durationMinutes * 60 * 1000;
+  const nowMs = Date.now();
+
+  // If checking today, exclude slots in the past
+  const searchStartMs = Math.max(workStartMs, nowMs + 10 * 60 * 1000);
+
+  const slots: AvailableSlot[] = [];
+  let cur = workStartMs;
+
+  while (cur + durationMs <= workEndMs) {
+    const slotEnd = cur + durationMs;
+    const overlaps = busyList.some((b) => {
+      const bStart = new Date(b.start).getTime();
+      const bEnd = new Date(b.end).getTime();
+      return cur < bEnd && slotEnd > bStart;
+    });
+
+    if (!overlaps && cur >= searchStartMs) {
+      const dStart = new Date(cur);
+      const dEnd = new Date(slotEnd);
+      const timeStr = dStart.toLocaleTimeString("en-IN", {
+        timeZone: "Asia/Kolkata",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      });
+      const startLabel = dStart.toLocaleTimeString("en-IN", {
+        timeZone: "Asia/Kolkata",
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+      });
+      const endLabel = dEnd.toLocaleTimeString("en-IN", {
+        timeZone: "Asia/Kolkata",
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+      });
+
+      const istStart = new Date(cur + 330 * 60 * 1000);
+      const istEnd = new Date(slotEnd + 330 * 60 * 1000);
+      const pad = (n: number) => String(n).padStart(2, "0");
+      const isoStart = `${istStart.getUTCFullYear()}-${pad(istStart.getUTCMonth() + 1)}-${pad(istStart.getUTCDate())}T${pad(istStart.getUTCHours())}:${pad(istStart.getUTCMinutes())}:00+05:30`;
+      const isoEnd = `${istEnd.getUTCFullYear()}-${pad(istEnd.getUTCMonth() + 1)}-${pad(istEnd.getUTCDate())}T${pad(istEnd.getUTCHours())}:${pad(istEnd.getUTCMinutes())}:00+05:30`;
+
+      slots.push({
+        time: timeStr,
+        label: `${startLabel} – ${endLabel}`,
+        start: isoStart,
+        end: isoEnd,
+      });
+    }
+
+    cur += 30 * 60 * 1000;
+  }
+
+  return { slots };
+}
+
 export async function createCalendarEvent(
   tenantId: string,
   input: {

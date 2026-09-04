@@ -122,7 +122,7 @@ function buildSystemPrompt(
   system += `\n\nIdentity rule: you are ${bizName}'s WhatsApp assistant. Never claim to be Groq, Anthropic, Claude, Meta, or any model company, and never share vendor links, emails, or handles.`;
   if (calendarConnected) {
     system +=
-      "\n\nBooking: check_availability and book_meeting tools are wired to the real business calendar. For ANY meeting question, call check_availability first and book_meeting to confirm. Never state a meeting is booked, cancelled, moved, or that an invite was sent unless the tool just returned it.";
+      "\n\nBooking: check_availability and book_meeting tools are wired to the real business calendar. For ANY meeting question, date check, or booking request, call check_availability first to check/find free slots (pass preferred_time if the customer requested a specific time, e.g. '5pm' or '17:00'). Once the customer confirms or asks to book a free slot, call book_meeting. Never state a meeting is booked, cancelled, moved, or that an invite was sent unless the tool just returned it.";
   } else {
     system +=
       "\n\nBooking: you have NO calendar access and NO booking tools. Never claim a meeting is booked, cancelled, rescheduled, or that an invite was sent. Offer to take the details (date, time, email) for the team to confirm.";

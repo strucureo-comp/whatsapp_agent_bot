@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/empty-state";
 import { NewMeetingForm } from "@/components/new-meeting-form";
 import { CancelEventButton } from "@/components/cancel-event-button";
+import { LiveClock } from "@/components/live-clock";
 import { cn } from "@/lib/utils";
 
 export default async function CalendarPage({
@@ -44,11 +45,14 @@ export default async function CalendarPage({
 
   return (
     <div className="flex flex-col gap-4">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Calendar & meetings</h1>
-        <p className="text-sm text-muted-foreground">
-          Real events from the connected Google account · what the bot booked · book manually
-        </p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Calendar & meetings</h1>
+          <p className="text-sm text-muted-foreground">
+            Real events from the connected Google account · what the bot booked · book manually
+          </p>
+        </div>
+        <LiveClock className="sm:max-w-md w-full" />
       </div>
 
       <div className="flex flex-wrap items-center gap-2">

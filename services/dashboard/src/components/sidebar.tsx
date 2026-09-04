@@ -16,6 +16,7 @@ import {
   CalendarDays,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { LiveClock } from "@/components/live-clock";
 
 const NAV = [
   { href: "/", label: "Overview", icon: LayoutDashboard },
@@ -61,6 +62,7 @@ export function Sidebar() {
         })}
       </nav>
       <div className="mt-auto flex flex-col gap-2 border-t p-3">
+        <LiveClock compact />
         {user?.email ? (
           <div className="flex items-center justify-between gap-2 rounded-md bg-muted px-2.5 py-1.5">
             <span className="truncate text-xs font-medium" title={user.email}>

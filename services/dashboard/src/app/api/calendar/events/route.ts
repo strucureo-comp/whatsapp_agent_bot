@@ -35,7 +35,9 @@ export async function POST(request: Request) {
   if (Number.isNaN(Date.parse(start))) {
     return Response.json({ error: "Invalid date/time" }, { status: 400 });
   }
-  const end = new Date(endMs).toISOString();
+  const istEnd = new Date(endMs + 330 * 60 * 1000);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const end = `${istEnd.getUTCFullYear()}-${pad(istEnd.getUTCMonth() + 1)}-${pad(istEnd.getUTCDate())}T${pad(istEnd.getUTCHours())}:${pad(istEnd.getUTCMinutes())}:00+05:30`;
   const attendeeEmail =
     typeof body.attendee_email === "string" && body.attendee_email.includes("@")
       ? body.attendee_email.trim()

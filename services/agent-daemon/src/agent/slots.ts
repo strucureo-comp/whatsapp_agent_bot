@@ -85,9 +85,13 @@ export class SlotManager {
     if (this.freeBusyChecker) {
       try {
         const busySlots = await this.freeBusyChecker.checkFreeBusy(calendarId, start, end);
-        const isBusy = busySlots.some(
-          (busy) => busy.start < end && busy.end > start,
-        );
+        const startMs = new Date(start).getTime();
+        const endMs = new Date(end).getTime();
+        const isBusy = busySlots.some((busy) => {
+          const bStart = new Date(busy.start).getTime();
+          const bEnd = new Date(busy.end).getTime();
+          return bStart < endMs && bEnd > startMs;
+        });
 
         if (isBusy) {
           getLogger().warn(
