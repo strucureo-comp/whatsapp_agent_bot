@@ -92,18 +92,30 @@ export function ChatThread({
 
   // Background poll for new messages every 4 seconds
   useEffect(() => {
+    let cancelled = false;
     const timer = setInterval(async () => {
       try {
-        const res = await fetch(`/api/conversations/${conversation.id}`);
+        const res = await fetch(`/api/conversations/${conversation.id}/messages`);
         if (!res.ok) return;
-        // Also refresh router so other components stay updated
-        router.refresh();
+        const data = await res.json();
+        if (!cancelled && Array.isArray(data.messages)) {
+          setMessages((current) => {
+            // Check if there are changes or new messages
+            if (data.messages.length !== current.length) {
+              return data.messages;
+            }
+            return current;
+          });
+        }
       } catch {
         // quiet background refresh
       }
-    }, 4000);
-    return () => clearInterval(timer);
-  }, [conversation.id, router]);
+    }, 3500);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [conversation.id]);
 
   // Auto scroll down if user was already at bottom when new messages arrive
   useEffect(() => {

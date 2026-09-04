@@ -3,6 +3,47 @@ import { getPool } from "@/lib/db";
 import { sendGatewayMessage } from "@/lib/gateway";
 import { revalidatePath } from "next/cache";
 
+export async function GET(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const uid = await requireAuth();
+  if (!uid) {
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const { id } = await params;
+  const pool = getPool();
+
+  try {
+    const convRes = await pool.query(
+      `SELECT c.id FROM conversations c
+       JOIN tenants t ON t.id = c.tenant_id
+       WHERE c.id = $1 AND t.owner_uid = $2`,
+      [id, uid]
+    );
+
+    if (convRes.rowCount === 0) {
+      return Response.json({ error: "Conversation not found" }, { status: 404 });
+    }
+
+    const msgsRes = await pool.query(
+      `SELECT id, conversation_id, wa_message_id, role, content, usage_json, created_at
+       FROM messages
+       WHERE conversation_id = $1
+       ORDER BY created_at ASC`,
+      [id]
+    );
+
+    return Response.json({ messages: msgsRes.rows });
+  } catch (err) {
+    return Response.json(
+      { error: err instanceof Error ? err.message : String(err) },
+      { status: 500 }
+    );
+  }
+}
+
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
