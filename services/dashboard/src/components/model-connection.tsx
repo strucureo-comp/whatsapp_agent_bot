@@ -29,7 +29,7 @@ import {
   SECRET_PROVIDERS,
   SecretProvider,
   TenantSecretMasked,
-} from "@/lib/tenant-secrets";
+} from "@/lib/tenant-secrets-config";
 
 
 export function ModelConnection({ tenant }: { tenant: Tenant }) {
