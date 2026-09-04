@@ -1,4 +1,5 @@
 import { getPool } from "@/lib/db";
+import { getGoogleRedirectUri } from "@/lib/google";
 
 const SCOPES = [
   "https://www.googleapis.com/auth/calendar",
@@ -23,8 +24,7 @@ export async function GET(request: Request) {
   }
 
   const clientId = process.env.GOOGLE_CLIENT_ID;
-  const redirectUri =
-    process.env.GOOGLE_REDIRECT_URI ?? "http://localhost:3000/api/auth/google/callback";
+  const redirectUri = getGoogleRedirectUri(request);
   if (!clientId) {
     return Response.json({ error: "GOOGLE_CLIENT_ID not configured on server" }, { status: 500 });
   }

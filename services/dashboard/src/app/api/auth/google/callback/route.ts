@@ -1,13 +1,16 @@
 import { revalidatePath } from "next/cache";
 import { getPool } from "@/lib/db";
 import { saveGoogleConnection } from "@/lib/queries";
+import { getGoogleRedirectUri } from "@/lib/google";
 
-function fail(tenantId: string | null, reason: string): Response {
+function fail(request: Request, tenantId: string | null, reason: string): Response {
+  const redirectUri = getGoogleRedirectUri(request);
+  const origin = new URL(redirectUri).origin;
   const dest =
     tenantId && tenantId !== "unknown"
       ? `/tenants/${tenantId}?google=error&reason=${encodeURIComponent(reason)}`
       : `/tenants?google=error&reason=${encodeURIComponent(reason)}`;
-  return Response.redirect(new URL(dest, process.env.GOOGLE_REDIRECT_URI ?? "http://localhost:3000"), 302);
+  return Response.redirect(new URL(dest, origin), 302);
 }
 
 /**
@@ -20,17 +23,16 @@ export async function GET(request: Request) {
   const state = url.searchParams.get("state");
   const oauthError = url.searchParams.get("error");
 
-  if (oauthError) return fail(state, `Google said: ${oauthError}`);
-  if (!code || !state) return fail(state, "Missing code or state from Google");
+  if (oauthError) return fail(request, state, `Google said: ${oauthError}`);
+  if (!code || !state) return fail(request, state, "Missing code or state from Google");
 
   const tenant = await getPool().query(`SELECT id FROM tenants WHERE id = $1`, [state]);
-  if (tenant.rowCount === 0) return fail(null, "Unknown tenant in state");
+  if (tenant.rowCount === 0) return fail(request, null, "Unknown tenant in state");
 
   const clientId = process.env.GOOGLE_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-  const redirectUri =
-    process.env.GOOGLE_REDIRECT_URI ?? "http://localhost:3000/api/auth/google/callback";
-  if (!clientId || !clientSecret) return fail(state, "Google OAuth not configured on server");
+  const redirectUri = getGoogleRedirectUri(request);
+  if (!clientId || !clientSecret) return fail(request, state, "Google OAuth not configured on server");
 
   // Code → tokens.
   const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
@@ -47,10 +49,11 @@ export async function GET(request: Request) {
   });
   const tokens = await tokenRes.json().catch(() => ({}));
   if (!tokenRes.ok || !tokens.access_token) {
-    return fail(state, tokens?.error_description ?? tokens?.error ?? "Token exchange failed");
+    return fail(request, state, tokens?.error_description ?? tokens?.error ?? "Token exchange failed");
   }
   if (!tokens.refresh_token) {
     return fail(
+      request,
       state,
       "Google did not return a refresh token — remove this app at myaccount.google.com/permissions and reconnect"
     );
@@ -79,8 +82,9 @@ export async function GET(request: Request) {
   });
 
   revalidatePath(`/tenants/${state}`);
+  const origin = new URL(redirectUri).origin;
   return Response.redirect(
-    new URL(`/tenants/${state}?google=connected`, redirectUri),
+    new URL(`/tenants/${state}?google=connected`, origin),
     302
   );
 }

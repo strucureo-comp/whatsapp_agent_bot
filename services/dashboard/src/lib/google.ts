@@ -181,3 +181,19 @@ export async function getBotBookings(tenantId: string, limit = 20): Promise<BotB
     };
   });
 }
+
+export function getGoogleRedirectUri(request?: Request): string {
+  const envUri = process.env.GOOGLE_REDIRECT_URI;
+  if (envUri && !envUri.includes("your-project-name") && !envUri.includes("<")) {
+    return envUri;
+  }
+  if (request) {
+    const proto = request.headers.get("x-forwarded-proto") ?? "https";
+    const host =
+      request.headers.get("x-forwarded-host") ??
+      request.headers.get("host") ??
+      new URL(request.url).host;
+    return `${proto}://${host}/api/auth/google/callback`;
+  }
+  return "http://localhost:3000/api/auth/google/callback";
+}
