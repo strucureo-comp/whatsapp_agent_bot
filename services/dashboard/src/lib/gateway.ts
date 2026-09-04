@@ -59,3 +59,18 @@ export async function disconnectSession(tenantId: string, wipe = false) {
     body: JSON.stringify({ tenant_id: tenantId, wipe }),
   });
 }
+
+export async function sendGatewayMessage(tenantId: string, to: string, body: string) {
+  return gatewayFetch<{ status: string; id?: string }>(
+    "/messages/send",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        tenant_id: tenantId,
+        to,
+        body,
+        allow_unsolicited: true,
+      }),
+    }
+  );
+}

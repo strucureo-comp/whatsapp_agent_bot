@@ -14,6 +14,7 @@ import { AgentToggle } from "@/components/agent-toggle";
 import { ContactDrawer } from "@/components/contact-drawer";
 import { ClearTestChats } from "@/components/clear-test-chats";
 import { ResolveEscalationButton } from "@/components/resolve-button";
+import { ChatThread } from "@/components/chat-thread";
 import { cn } from "@/lib/utils";
 
 function displayName(c: { customer_name: string; customer_number: string }) {
@@ -65,10 +66,10 @@ export default async function ConversationsPage(props: { searchParams: Promise<a
         <ClearTestChats tenantId={tenantId} />
       </div>
 
-      <div className="grid overflow-hidden rounded-xl border bg-white md:grid-cols-[320px_1fr] min-h-[540px] max-h-[calc(100vh-190px)]">
+      <div className="grid overflow-hidden rounded-xl border bg-white md:grid-cols-[330px_1fr] h-[calc(100vh-170px)] min-h-[560px]">
         {/* ── Left: search + chat list ─────────────────────────── */}
-        <div className={cn("flex-col border-r", selected ? "hidden md:flex" : "flex")}>
-          <div className="flex flex-col gap-2 border-b p-3">
+        <div className={cn("flex flex-col h-full min-h-0 border-r", selected ? "hidden md:flex" : "flex")}>
+          <div className="flex flex-col gap-2 border-b p-3 shrink-0">
             <form action="/conversations" method="get" className="flex gap-2">
               {tenantId ? <input type="hidden" name="tenant" value={tenantId} /> : null}
               {params.status ? <input type="hidden" name="status" value={params.status} /> : null}
@@ -122,7 +123,7 @@ export default async function ConversationsPage(props: { searchParams: Promise<a
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto">
+          <div className="flex-1 min-h-0 overflow-y-auto">
             {conversations.length === 0 ? (
               <p className="p-4 text-sm text-muted-foreground">No chats match.</p>
             ) : (
@@ -186,86 +187,21 @@ export default async function ConversationsPage(props: { searchParams: Promise<a
         </div>
 
         {/* ── Right: thread ────────────────────────────────────── */}
-        <div className={cn("flex-col bg-[#f7f5f2]", selected ? "flex" : "hidden md:flex")}>
+        <div className={cn("flex flex-col h-full min-h-0 bg-[#efeae2]", selected ? "flex" : "hidden md:flex")}>
           {!selected ? (
-            <div className="flex flex-1 items-center justify-center p-8">
+            <div className="flex flex-1 items-center justify-center p-8 bg-[#f7f5f2]">
               <EmptyState
                 icon={MessageCircle}
                 title="Select a chat"
-                hint="Pick a conversation on the left to read its full history."
+                hint="Pick a conversation on the left to read its full history and reply."
               />
             </div>
           ) : (
-            <>
-              <AutoRefresh intervalMs={5000} />
-              <div className="flex items-center gap-2 border-b bg-white px-3 py-2">
-                <Button asChild variant="ghost" size="icon" className="md:hidden">
-                  <Link href={keepParams(base, { c: undefined })}>
-                    <ArrowLeft />
-                  </Link>
-                </Button>
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-zinc-500 text-[11px] font-bold text-white">
-                  {selected.customer_number.slice(0, 2)}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-semibold">
-                    {displayName(selected)}
-                  </span>
-                  <span className="block truncate font-mono text-[11px] text-muted-foreground">
-                    {selected.customer_number} · {selected.tenant_name} · {selected.message_count} msgs
-                    {selected.is_test ? " · test" : ""}
-                  </span>
-                </span>
-                <ContactTagBadge tag={selected.contact_tag} />
-                <AgentToggle conversationId={selected.id} status={selected.status} compact />
-                <ContactDrawer conversation={selected} tickets={chatTickets} />
-                {selected.status === "escalated" ? (
-                  <ResolveEscalationButton conversationId={selected.id} />
-                ) : null}
-              </div>
-
-              <div className="flex flex-1 flex-col gap-2 overflow-y-auto p-4">
-                {thread.length === 0 ? (
-                  <p className="text-center text-sm text-muted-foreground">No messages yet.</p>
-                ) : (
-                  thread.map((m) => {
-                    const mine = m.role === "assistant";
-                    return (
-                      <div key={m.id} className={cn("flex", mine ? "justify-start" : "justify-end")}>
-                        <div
-                          className={cn(
-                            "max-w-[80%] rounded-2xl px-3.5 py-2 text-sm whitespace-pre-wrap shadow-sm",
-                            mine
-                              ? "rounded-tl-sm bg-white text-zinc-900"
-                              : "rounded-tr-sm bg-[#d9fdd3] text-zinc-900"
-                          )}
-                        >
-                          <p>{m.content}</p>
-                          <p className="mt-1 text-right text-[10px] text-zinc-500">
-                            {formatDateTime(m.created_at)}
-                          </p>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-
-              <div className="border-t bg-white px-4 py-2.5 text-center text-xs text-muted-foreground">
-                {selected.status === "active" ? (
-                  <>Agent replies automatically · refreshes every 5s</>
-                ) : selected.status === "human_handling" ? (
-                  <>Human mode — reply from the linked phone, history keeps loading here</>
-                ) : (
-                  <>Escalated — resolve to hand back to the bot</>
-                )}
-                {selected.status === "escalated" || selected.status === "human_handling" ? (
-                  <span className="ml-2">
-                    <Badge variant="outline">{selected.status.replace("_", " ")}</Badge>
-                  </span>
-                ) : null}
-              </div>
-            </>
+            <ChatThread
+              conversation={selected}
+              initialMessages={thread}
+              chatTickets={chatTickets}
+            />
           )}
         </div>
       </div>
