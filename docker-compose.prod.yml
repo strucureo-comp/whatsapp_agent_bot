@@ -61,8 +61,8 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-strucureo}:${POSTGRES_PASSWORD:?set in .env.prod}@postgres:5432/${POSTGRES_DB:-strucureo}?sslmode=disable
       GATEWAY_SECRET: ${GATEWAY_SECRET:?set in .env.prod}
       GATEWAY_MAX_SEND_RATE: ${GATEWAY_MAX_SEND_RATE:-5}
-    expose:
-      - "8080"
+    ports:
+      - "8080:8080"
 
   daemon:
     build: ./services/agent-daemon
