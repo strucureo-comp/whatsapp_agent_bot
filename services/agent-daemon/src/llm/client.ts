@@ -284,13 +284,15 @@ export class LlmClient {
       },
     }));
 
-    const response = await this.groq.chat.completions.create({
-      model,
-      messages: groqMessages,
-      max_tokens: maxTokens,
-      tools: groqTools && groqTools.length > 0 ? groqTools : undefined,
-      temperature: 0.7,
-    });
+    const response = await withGroqRetry(() =>
+      this.groq.chat.completions.create({
+        model,
+        messages: groqMessages,
+        max_tokens: maxTokens,
+        tools: groqTools && groqTools.length > 0 ? groqTools : undefined,
+        temperature: 0.7,
+      }),
+    );
 
     const choice = response.choices[0];
     let content = choice.message?.content ?? "";
@@ -377,20 +379,22 @@ export class LlmClient {
         `"reply": "<your direct reply to the user, complete on its own>"}\n` +
         `Set tool (not null) whenever the latest user message matches a tool's job. ` +
         `reply must always be finished text you could send as-is.`;
-      const routed = await this.groq.chat.completions.create({
-        model,
-        messages: [{ role: "system", content: routerSystem }, ...groqMessages.slice(1)],
-        max_tokens: maxTokens,
-        temperature: 0,
-        response_format: { type: "json_object" },
-      });
+      const routed = await withGroqRetry(() =>
+        this.groq.chat.completions.create({
+          model,
+          messages: [{ role: "system", content: routerSystem }, ...groqMessages.slice(1)],
+          max_tokens: maxTokens,
+          temperature: 0,
+          response_format: { type: "json_object" },
+        }),
+      );
       const rawRouted = routed.choices[0].message?.content ?? "";
       const decision = parseRouterJson(rawRouted, names);
       if (decision) {
         // eslint-disable-next-line no-console
         console.info(`[llm] json-router on ${model}: tool=${decision.call?.name ?? "none"}`);
         return {
-          content: decision.reply,
+          content: decision.call ? "" : decision.reply,
           tool_calls: decision.call ? [decision.call] : undefined,
           usage: {
             input_tokens: routed.usage?.prompt_tokens ?? 0,
@@ -406,18 +410,20 @@ export class LlmClient {
     }
 
     // Attempt 2: plain text + ```tool fence parse (legacy path).
-    const response = await this.groq.chat.completions.create({
-      model,
-      messages: groqMessages,
-      max_tokens: maxTokens,
-      temperature: 0,
-    });
+    const response = await withGroqRetry(() =>
+      this.groq.chat.completions.create({
+        model,
+        messages: groqMessages,
+        max_tokens: maxTokens,
+        temperature: 0,
+      }),
+    );
 
     const raw = response.choices[0].message?.content ?? "";
     const parsed = parseMcpToolCall(raw, names);
 
     return {
-      content: parsed.text,
+      content: parsed.call ? "" : parsed.text,
       tool_calls: parsed.call ? [parsed.call] : undefined,
       usage: {
         input_tokens: response.usage?.prompt_tokens ?? 0,
@@ -622,6 +628,35 @@ function parseRouterJson(
 
 // Models proven (this process) to reject native tool definitions.
 const textOnlyModels = new Set<string>();
+
+async function withGroqRetry<T>(fn: () => Promise<T>, maxRetries = 2, delayMs = 1500): Promise<T> {
+  let attempt = 0;
+  while (true) {
+    try {
+      return await fn();
+    } catch (err: unknown) {
+      attempt++;
+      const e = err as {
+        status?: number;
+        message?: string;
+        error?: { code?: string; type?: string };
+        headers?: Record<string, string>;
+      };
+      const is429 =
+        e?.status === 429 ||
+        e?.status === 503 ||
+        String(e?.message || "").includes("429") ||
+        e?.error?.code === "rate_limit_exceeded";
+      if (is429 && attempt <= maxRetries) {
+        const retryAfterSec = parseFloat(e?.headers?.["retry-after"] || "1.5");
+        const waitMs = isNaN(retryAfterSec) ? delayMs : Math.max(retryAfterSec * 1000, delayMs);
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
+        continue;
+      }
+      throw err;
+    }
+  }
+}
 
 function isToolUnsupportedError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);

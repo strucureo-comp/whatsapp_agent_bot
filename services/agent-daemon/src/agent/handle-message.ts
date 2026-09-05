@@ -119,10 +119,16 @@ function buildSystemPrompt(
       lines.map((l) => `- ${l}`).join("\n");
   }
   const bizName = text(profile.business_name) || "this business";
-  system += `\n\nIdentity rule: you are ${bizName}'s WhatsApp assistant. Never claim to be Groq, Anthropic, Claude, Meta, or any model company, and never share vendor links, emails, or handles.`;
+  system += `\n\nIdentity & Human Tone:
+- You are a real, friendly team member representing ${bizName} on WhatsApp.
+- Always talk naturally, warmly, and concisely like a real human texting on WhatsApp (1 to 2 short sentences per message).
+- NEVER say "I am an AI assistant", "As an AI", "I am a virtual assistant", or give disclaimer speeches.
+- NEVER send placeholder phrases like "Let me check...", "Awaiting response...", "Please hold on while I check...", or "[Awaiting tool response]".
+- Execute tools silently in the background and reply directly with the actual answer.
+- Avoid robotic greetings, bullet lists, or corporate marketing monologues unless specifically requested.`;
   if (calendarConnected) {
     system +=
-      "\n\nBooking: check_availability and book_meeting tools are wired to the real business calendar. For ANY meeting question, date check, or booking request, call check_availability first to check/find free slots (pass preferred_time if the customer requested a specific time, e.g. '5pm' or '17:00'). Once the customer confirms or asks to book a free slot, call book_meeting. Never state a meeting is booked, cancelled, moved, or that an invite was sent unless the tool just returned it.";
+      "\n\nBooking: check_availability and book_meeting tools are wired to the real business calendar. For ANY meeting question, date check, or booking request, silently call check_availability first to check/find free slots (pass preferred_time if the customer requested a specific time, e.g. '5pm' or '17:00'). Once you know the slots, answer the customer directly and warmly. Once the customer confirms or asks to book a free slot, call book_meeting. Never state a meeting is booked, cancelled, moved, or that an invite was sent unless the tool just returned it.";
   } else {
     system +=
       "\n\nBooking: you have NO calendar access and NO booking tools. Never claim a meeting is booked, cancelled, rescheduled, or that an invite was sent. Offer to take the details (date, time, email) for the team to confirm.";
@@ -620,6 +626,15 @@ export async function handleMessage(
     // Truncate at sentence boundary if over limit
     if (replyContent.length > replyMaxTokens * 4) {
       replyContent = truncateAtSentence(replyContent, replyMaxTokens * 4);
+    }
+
+    // Strip or replace raw internal bracketed markers that may leak
+    if (
+      /^\[(awaiting tool response|tool call|continuing)\]/i.test(replyContent.trim()) ||
+      replyContent.includes("[Awaiting tool response]")
+    ) {
+      log.warn({ tenantId, conversationId, replyContent }, "Sanitized internal placeholder reply");
+      replyContent = "I'm checking our calendar for you now.";
     }
 
     // Never persist or send an empty reply (some models return blank text
