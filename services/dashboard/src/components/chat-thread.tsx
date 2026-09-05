@@ -251,20 +251,40 @@ export function ChatThread({
           </Link>
         </Button>
         <div className="relative">
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-xs font-bold text-white shadow-sm">
-            {conversation.customer_number.slice(0, 2)}
+          <span
+            className={cn(
+              "flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white shadow-sm",
+              conversation.channel === "email" ? "bg-blue-600" : "bg-emerald-600"
+            )}
+          >
+            {(conversation.customer_number || conversation.customer_email || "EM").slice(0, 2).toUpperCase()}
           </span>
-          <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-white bg-green-500" />
+          <span
+            className={cn(
+              "absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-white",
+              conversation.channel === "email" ? "bg-blue-500" : "bg-green-500"
+            )}
+          />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className="truncate text-sm font-semibold">
-              {conversation.customer_name || conversation.customer_number}
+              {conversation.customer_name || conversation.customer_email || conversation.customer_number}
+            </span>
+            <span
+              className={cn(
+                "rounded px-1.5 py-0.2 text-[10px] font-medium uppercase tracking-wider",
+                conversation.channel === "email"
+                  ? "bg-blue-50 text-blue-700 border border-blue-200"
+                  : "bg-emerald-50 text-emerald-700 border border-emerald-200"
+              )}
+            >
+              {conversation.channel || "whatsapp"}
             </span>
             <ContactTagBadge tag={conversation.contact_tag} />
           </div>
           <span className="block truncate font-mono text-[11px] text-muted-foreground">
-            {conversation.customer_number} · {conversation.tenant_name} · {messages.length} msgs
+            {conversation.customer_email || conversation.customer_number} · {conversation.tenant_name} · {messages.length} msgs
             {conversation.is_test ? " · test" : ""}
           </span>
         </div>
@@ -294,7 +314,7 @@ export function ChatThread({
               <Sparkles className="h-6 w-6 text-emerald-600" />
             </span>
             <p className="mt-2 text-sm font-medium text-zinc-700">No messages yet</p>
-            <p className="text-xs text-zinc-500">Send a message below to start the chat.</p>
+            <p className="text-xs text-zinc-500">Send a message below to start the conversation.</p>
           </div>
         ) : (
           messages.map((m) => {
@@ -308,10 +328,20 @@ export function ChatThread({
                   className={cn(
                     "relative max-w-[85%] sm:max-w-[72%] rounded-2xl px-3.5 py-2 text-sm shadow-sm transition-all",
                     isMine
-                      ? "rounded-tr-none bg-[#d9fdd3] text-zinc-900"
+                      ? conversation.channel === "email"
+                        ? "rounded-tr-none bg-blue-50 text-zinc-900 border border-blue-100"
+                        : "rounded-tr-none bg-[#d9fdd3] text-zinc-900"
                       : "rounded-tl-none bg-white text-zinc-900 border border-zinc-100"
                   )}
                 >
+                  {/* Email Subject Header if present */}
+                  {m.subject && (
+                    <div className="mb-1.5 pb-1 border-b border-black/10 flex items-center gap-1.5 text-xs font-semibold text-zinc-700">
+                      <span className="text-[10px] uppercase tracking-wider text-blue-700 bg-blue-100 px-1 rounded">Subject</span>
+                      <span className="truncate">{m.subject}</span>
+                    </div>
+                  )}
+
                   {/* Bubble Content Body */}
                   <MessageBubbleContent content={m.content} isMine={isMine} />
 
@@ -444,29 +474,45 @@ export function ChatThread({
                     handleSend();
                   }
                 }}
-                placeholder="Type a message (Enter to send, Shift+Enter for newline)..."
+                placeholder={
+                  conversation.channel === "email"
+                    ? "Compose email reply (Enter to send, Shift+Enter for newline)..."
+                    : "Type a WhatsApp message (Enter to send, Shift+Enter for newline)..."
+                }
                 rows={1}
-                className="w-full resize-none rounded-xl border border-zinc-200 bg-zinc-50 px-3.5 py-2 text-sm focus:bg-white focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 max-h-32 min-h-[38px]"
+                className={cn(
+                  "w-full resize-none rounded-xl border bg-zinc-50 px-3.5 py-2 text-sm focus:bg-white focus:outline-none focus:ring-1 max-h-32 min-h-[38px]",
+                  conversation.channel === "email"
+                    ? "border-blue-200 focus:border-blue-500 focus:ring-blue-500"
+                    : "border-zinc-200 focus:border-emerald-500 focus:ring-emerald-500"
+                )}
                 disabled={sending}
               />
             </div>
 
-            {/* Voice Note Button */}
-            <button
-              type="button"
-              onClick={startRecording}
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-500 hover:bg-emerald-50 hover:text-emerald-700 transition-colors"
-              title="Record voice note"
-            >
-              <Mic className="h-5 w-5" />
-            </button>
+            {/* Voice Note Button (WhatsApp only) */}
+            {conversation.channel !== "email" && (
+              <button
+                type="button"
+                onClick={startRecording}
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-500 hover:bg-emerald-50 hover:text-emerald-700 transition-colors"
+                title="Record voice note"
+              >
+                <Mic className="h-5 w-5" />
+              </button>
+            )}
 
             {/* Send Button */}
             <Button
               onClick={() => handleSend()}
               disabled={!inputText.trim() || sending}
               size="icon"
-              className="h-9 w-9 shrink-0 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm disabled:opacity-40"
+              className={cn(
+                "h-9 w-9 shrink-0 rounded-full text-white shadow-sm disabled:opacity-40",
+                conversation.channel === "email"
+                  ? "bg-blue-600 hover:bg-blue-700"
+                  : "bg-emerald-600 hover:bg-emerald-700"
+              )}
             >
               <Send className="h-4 w-4" />
             </Button>

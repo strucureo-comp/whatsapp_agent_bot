@@ -12,6 +12,7 @@ import { TenantEditor } from "@/components/tenant-editor";
 import { CompanyProfileForm } from "@/components/company-profile-form";
 import { ModelConnection } from "@/components/model-connection";
 import { GoogleCalendarCard } from "@/components/google-calendar-card";
+import { EmailChannelCard } from "@/components/email-channel-card";
 import { formatCents } from "@/components/stat-card";
 
 export default async function TenantDetailPage(props: {
@@ -108,6 +109,8 @@ export default async function TenantDetailPage(props: {
               />
             </CardContent>
           </Card>
+
+          <EmailChannelCard tenant={tenant} />
 
           <Card>
             <CardHeader>

@@ -69,7 +69,7 @@ export async function POST(
   const pool = getPool();
   // Fetch conversation and verify ownership via tenant
   const convRes = await pool.query(
-    `SELECT c.id, c.tenant_id, c.customer_number, c.customer_jid, c.status
+    `SELECT c.id, c.tenant_id, c.channel, c.customer_number, c.customer_jid, c.customer_email, c.status
      FROM conversations c
      JOIN tenants t ON t.id = c.tenant_id
      WHERE c.id = $1 AND t.owner_uid = $2`,
@@ -81,13 +81,26 @@ export async function POST(
   }
 
   const conv = convRes.rows[0];
+  const isEmail = conv.channel === "email";
+
+  let lastSubject = "Message from Support";
+  if (isEmail) {
+    const lastSubRes = await pool.query(
+      `SELECT subject FROM messages WHERE conversation_id = $1 AND subject IS NOT NULL ORDER BY created_at DESC LIMIT 1`,
+      [id]
+    );
+    if (lastSubRes.rowCount && lastSubRes.rows[0].subject) {
+      const s = lastSubRes.rows[0].subject;
+      lastSubject = s.toLowerCase().startsWith("re:") ? s : `Re: ${s}`;
+    }
+  }
 
   // 1. Insert message into database
   const msgRes = await pool.query(
-    `INSERT INTO messages (conversation_id, role, content, usage_json)
-     VALUES ($1, 'assistant', $2, NULL)
-     RETURNING id, conversation_id, wa_message_id, role, content, usage_json, created_at`,
-    [id, content]
+    `INSERT INTO messages (conversation_id, channel, role, content, subject, usage_json)
+     VALUES ($1, $2, 'assistant', $3, $4, NULL)
+     RETURNING id, conversation_id, wa_message_id, channel, subject, role, content, usage_json, created_at`,
+    [id, conv.channel || "whatsapp", content, isEmail ? lastSubject : null]
   );
 
   // 2. Touch conversation updated_at
@@ -98,9 +111,24 @@ export async function POST(
     [id]
   );
 
-  // 3. Send message via WhatsApp gateway
-  const recipient = conv.customer_jid || conv.customer_number;
-  const gatewayRes = await sendGatewayMessage(conv.tenant_id, recipient, content);
+  // 3. Dispatch outbound via the conversation's active channel
+  let dispatchStatus = "queued";
+  if (isEmail && conv.customer_email) {
+    const { sendOutboundEmail } = await import("@/lib/email/sender");
+    const emailRes = await sendOutboundEmail({
+      tenantId: conv.tenant_id,
+      to: conv.customer_email,
+      subject: lastSubject,
+      text: content,
+    });
+    dispatchStatus = emailRes.ok ? "sent" : "failed";
+  } else {
+    const recipient = conv.customer_jid || conv.customer_number;
+    if (recipient) {
+      const gatewayRes = await sendGatewayMessage(conv.tenant_id, recipient, content);
+      dispatchStatus = gatewayRes?.status ?? "queued";
+    }
+  }
 
   revalidatePath("/conversations");
   revalidatePath("/");
@@ -108,6 +136,6 @@ export async function POST(
   return Response.json({
     ok: true,
     message: msgRes.rows[0],
-    gatewayStatus: gatewayRes?.status ?? "queued",
+    gatewayStatus: dispatchStatus,
   });
 }

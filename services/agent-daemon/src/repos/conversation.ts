@@ -11,11 +11,14 @@ export type ContactTag = "new_lead" | "prospect" | "converted" | "vip" | "blocke
 export interface Conversation {
   id: string;
   tenant_id: string;
-  customer_number: string;
-  customer_jid: string;
+  channel?: "whatsapp" | "email" | "webchat";
+  customer_number?: string | null;
+  customer_jid?: string | null;
+  customer_email?: string | null;
   customer_name: string;
   contact_tag: ContactTag;
   notes: string;
+  channel_metadata?: Record<string, unknown> | null;
   status: ConversationStatus;
   is_test: boolean;
   created_at: Date;

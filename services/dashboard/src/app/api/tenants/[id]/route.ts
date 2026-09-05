@@ -14,6 +14,10 @@ const ALLOWED = new Set([
   "max_monthly_spend_cents",
   "reply_max_tokens",
   "debounce_ms",
+  "custom_email_address",
+  "email_signature",
+  "email_enabled",
+  "inbound_email_slug",
 ]);
 
 export async function PATCH(

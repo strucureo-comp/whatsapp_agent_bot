@@ -6,3 +6,4 @@
 005_contacts_tickets.sql
 006_tenant_secrets.sql
 007_any_llm.sql
+008_omnichannel_support.sql

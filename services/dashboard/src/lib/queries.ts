@@ -27,6 +27,10 @@ export interface Tenant {
   max_monthly_spend_cents: number;
   reply_max_tokens: number;
   debounce_ms: number;
+  inbound_email_slug?: string | null;
+  custom_email_address?: string | null;
+  email_signature?: string | null;
+  email_enabled?: boolean;
   created_at: string;
   updated_at: string;
   // aggregates
@@ -43,11 +47,14 @@ export interface Conversation {
   id: string;
   tenant_id: string;
   tenant_name: string;
-  customer_number: string;
-  customer_jid: string;
+  channel: "whatsapp" | "email" | "webchat";
+  customer_number: string | null;
+  customer_jid: string | null;
+  customer_email?: string | null;
   customer_name: string;
   contact_tag: ContactTag;
   notes: string;
+  channel_metadata?: Record<string, unknown> | null;
   status: "active" | "escalated" | "human_handling" | "closed";
   is_test: boolean;
   message_count: number;
@@ -60,6 +67,11 @@ export interface Message {
   id: string;
   conversation_id: string;
   wa_message_id: string | null;
+  channel?: "whatsapp" | "email" | "webchat" | null;
+  subject?: string | null;
+  email_message_id?: string | null;
+  in_reply_to?: string | null;
+  metadata?: Record<string, unknown> | null;
   role: "user" | "assistant" | "system";
   content: string;
   usage_json: Record<string, number> | null;
@@ -182,6 +194,7 @@ export async function getTenant(id: string, ownerUid: string): Promise<Tenant | 
 export async function getConversations(ownerUid: string, opts?: {
   tenantId?: string;
   status?: string;
+  channel?: string;
   includeTest?: boolean;
   limit?: number;
   search?: string;
@@ -193,19 +206,23 @@ export async function getConversations(ownerUid: string, opts?: {
     vals.push(opts.tenantId);
     conds.push(`c.tenant_id = $${vals.length}`);
   }
-  if (opts?.status) {
+  if (opts?.status && opts.status !== "all") {
     vals.push(opts.status);
     conds.push(`c.status = $${vals.length}`);
+  }
+  if (opts?.channel && opts.channel !== "all") {
+    vals.push(opts.channel);
+    conds.push(`c.channel = $${vals.length}`);
   }
   if (!opts?.includeTest) conds.push(`c.is_test = false`);
   if (opts?.search) {
     vals.push(`%${opts.search}%`);
-    conds.push(`c.customer_number ILIKE $${vals.length}`);
+    conds.push(`(c.customer_number ILIKE $${vals.length} OR c.customer_email ILIKE $${vals.length} OR c.customer_name ILIKE $${vals.length})`);
   }
   vals.push(opts?.limit ?? 100);
   const res = await pool.query(
-    `SELECT c.id, c.tenant_id, t.name AS tenant_name, c.customer_number, c.customer_jid,
-            c.customer_name, c.contact_tag, c.notes,
+    `SELECT c.id, c.tenant_id, t.name AS tenant_name, c.channel, c.customer_number, c.customer_jid,
+            c.customer_email, c.customer_name, c.contact_tag, c.notes, c.channel_metadata,
             c.status, c.is_test, c.updated_at,
             (SELECT COUNT(*)::int FROM messages m WHERE m.conversation_id = c.id) AS message_count,
             (SELECT MAX(m.created_at) FROM messages m WHERE m.conversation_id = c.id) AS last_message_at,
@@ -222,8 +239,8 @@ export async function getConversations(ownerUid: string, opts?: {
 export async function getConversation(id: string, ownerUid: string): Promise<Conversation | null> {
   const pool = getPool();
   const res = await pool.query(
-    `SELECT c.id, c.tenant_id, t.name AS tenant_name, c.customer_number, c.customer_jid,
-            c.customer_name, c.contact_tag, c.notes,
+    `SELECT c.id, c.tenant_id, t.name AS tenant_name, c.channel, c.customer_number, c.customer_jid,
+            c.customer_email, c.customer_name, c.contact_tag, c.notes, c.channel_metadata,
             c.status, c.is_test, c.updated_at,
             (SELECT COUNT(*)::int FROM messages m WHERE m.conversation_id = c.id) AS message_count,
             (SELECT MAX(m.created_at) FROM messages m WHERE m.conversation_id = c.id) AS last_message_at,
@@ -241,7 +258,7 @@ export async function getMessages(conversationId: string, ownerUid: string): Pro
   const check = await pool.query(`SELECT 1 FROM conversations c JOIN tenants t ON c.tenant_id = t.id WHERE c.id = $1 AND t.owner_uid = $2`, [conversationId, ownerUid]);
   if (check.rows.length === 0) return [];
   const res = await pool.query(
-    `SELECT m.id, m.conversation_id, m.wa_message_id, m.role, m.content, m.usage_json, m.created_at
+    `SELECT m.id, m.conversation_id, m.wa_message_id, m.channel, m.subject, m.email_message_id, m.in_reply_to, m.role, m.content, m.usage_json, m.metadata, m.created_at
        FROM messages m WHERE m.conversation_id = $1 ORDER BY m.created_at ASC`,
     [conversationId],
   );

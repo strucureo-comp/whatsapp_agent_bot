@@ -1,6 +1,6 @@
 import { connection } from "next/server";
 import Link from "next/link";
-import { ArrowLeft, MessageCircle, Search } from "lucide-react";
+import { ArrowLeft, Mail, MessageCircle, MessageSquare, Search } from "lucide-react";
 import { requireAuth } from "@/lib/auth-server";
 import { getConversation, getConversations, getMessages, getTenants, getTickets } from "@/lib/queries";
 import { formatDateTime } from "@/lib/format";
@@ -17,11 +17,12 @@ import { ResolveEscalationButton } from "@/components/resolve-button";
 import { ChatThread } from "@/components/chat-thread";
 import { cn } from "@/lib/utils";
 
-function displayName(c: { customer_name: string; customer_number: string }) {
-  return c.customer_name || c.customer_number;
+function displayName(c: { customer_name?: string | null; customer_number?: string | null; customer_email?: string | null }) {
+  return c.customer_name || c.customer_email || c.customer_number || "Inquiry";
 }
 
 const STATUSES = ["all", "active", "escalated", "human_handling", "closed"];
+const CHANNELS = ["all", "whatsapp", "email"];
 
 function keepParams(
   base: Record<string, string | undefined>,
@@ -42,11 +43,12 @@ export default async function ConversationsPage(props: { searchParams: Promise<a
   const params = await props.searchParams;
   const tenantId = params.tenant || undefined;
   const status = params.status && params.status !== "all" ? params.status : undefined;
-  const base = { tenant: tenantId, status: params.status, test: params.test, q: params.q };
+  const channel = params.channel && params.channel !== "all" ? params.channel : undefined;
+  const base = { tenant: tenantId, status: params.status, channel: params.channel, test: params.test, q: params.q };
 
   const [tenants, conversations] = await Promise.all([
     getTenants(uid),
-    getConversations(uid, { tenantId, status, includeTest: params.test === "1", search: params.q }),
+    getConversations(uid, { tenantId, status, channel, includeTest: params.test === "1", search: params.q }),
   ]);
 
   const selected = params.c ? await getConversation(params.c, uid) : null;
@@ -58,29 +60,59 @@ export default async function ConversationsPage(props: { searchParams: Promise<a
     <div className="flex flex-col gap-4">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Chats</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Chats & Inboxes</h1>
           <p className="text-sm text-muted-foreground">
-            WhatsApp-web style inbox · history loads per chat · flip Agent/Human per chat
+            Omnichannel inbox · WhatsApp & Inbound Email · live AI replies and human handoff
           </p>
         </div>
         <ClearTestChats tenantId={tenantId} />
       </div>
 
-      <div className="grid overflow-hidden rounded-xl border bg-white md:grid-cols-[330px_1fr] h-[calc(100vh-170px)] min-h-[560px]">
+      <div className="grid overflow-hidden rounded-xl border bg-white md:grid-cols-[340px_1fr] h-[calc(100vh-170px)] min-h-[560px]">
         {/* ── Left: search + chat list ─────────────────────────── */}
         <div className={cn("flex flex-col h-full min-h-0 border-r", selected ? "hidden md:flex" : "flex")}>
           <div className="flex flex-col gap-2 border-b p-3 shrink-0">
             <form action="/conversations" method="get" className="flex gap-2">
               {tenantId ? <input type="hidden" name="tenant" value={tenantId} /> : null}
               {params.status ? <input type="hidden" name="status" value={params.status} /> : null}
+              {params.channel ? <input type="hidden" name="channel" value={params.channel} /> : null}
               <div className="relative flex-1">
                 <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input name="q" defaultValue={params.q ?? ""} placeholder="Search number…" className="pl-8" />
+                <Input name="q" defaultValue={params.q ?? ""} placeholder="Search number, email…" className="pl-8" />
               </div>
               <Button type="submit" variant="outline" size="sm">
                 Go
               </Button>
             </form>
+
+            {/* Channels toggle */}
+            <div className="flex items-center gap-1 border-b pb-1.5 pt-0.5">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mr-1">Channel:</span>
+              {CHANNELS.map((ch) => {
+                const active = (params.channel ?? "all") === ch;
+                return (
+                  <Link
+                    key={ch}
+                    href={keepParams(base, { channel: ch === "all" ? undefined : ch })}
+                    className={cn(
+                      "flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-medium transition-colors",
+                      active
+                        ? ch === "email"
+                          ? "bg-blue-600 text-white"
+                          : ch === "whatsapp"
+                            ? "bg-emerald-600 text-white"
+                            : "bg-zinc-800 text-white"
+                        : "text-muted-foreground hover:bg-accent"
+                    )}
+                  >
+                    {ch === "whatsapp" && <MessageCircle className="h-3 w-3" />}
+                    {ch === "email" && <Mail className="h-3 w-3" />}
+                    {ch === "all" ? "All" : ch.charAt(0).toUpperCase() + ch.slice(1)}
+                  </Link>
+                );
+              })}
+            </div>
+
             <div className="flex flex-wrap gap-1">
               <Link
                 href={keepParams(base, { tenant: undefined })}
@@ -89,7 +121,7 @@ export default async function ConversationsPage(props: { searchParams: Promise<a
                   !tenantId ? "bg-primary text-primary-foreground" : "hover:bg-accent"
                 )}
               >
-                All
+                All Tenants
               </Link>
               {tenants.map((t) => (
                 <Link
@@ -125,16 +157,19 @@ export default async function ConversationsPage(props: { searchParams: Promise<a
 
           <div className="flex-1 min-h-0 overflow-y-auto">
             {conversations.length === 0 ? (
-              <p className="p-4 text-sm text-muted-foreground">No chats match.</p>
+              <p className="p-4 text-sm text-muted-foreground">No conversations match.</p>
             ) : (
               conversations.map((c) => {
                 const isSel = selected?.id === c.id;
+                const isEmail = c.channel === "email";
                 const avatarColor =
                   c.status === "escalated"
                     ? "bg-red-500"
                     : c.status === "human_handling"
                       ? "bg-amber-500"
-                      : "bg-zinc-500";
+                      : isEmail
+                        ? "bg-blue-600"
+                        : "bg-emerald-600";
                 return (
                   <Link
                     key={c.id}
@@ -146,11 +181,20 @@ export default async function ConversationsPage(props: { searchParams: Promise<a
                   >
                     <span
                       className={cn(
-                        "flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white",
+                        "flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white relative",
                         avatarColor
                       )}
                     >
-                      {c.customer_number.slice(0, 2)}
+                      {isEmail ? <Mail className="h-4 w-4" /> : <MessageCircle className="h-4 w-4" />}
+                      <span
+                        className={cn(
+                          "absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full text-[9px] text-white border border-white",
+                          isEmail ? "bg-blue-700" : "bg-emerald-700"
+                        )}
+                        title={c.channel}
+                      >
+                        {isEmail ? "@" : "W"}
+                      </span>
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="flex items-baseline justify-between gap-2">
@@ -166,6 +210,14 @@ export default async function ConversationsPage(props: { searchParams: Promise<a
                           {c.last_snippet ?? "No messages yet"}
                         </span>
                         <span className="flex shrink-0 items-center gap-1">
+                          <span
+                            className={cn(
+                              "rounded px-1.5 py-0.2 text-[9px] font-medium uppercase tracking-wider",
+                              isEmail ? "bg-blue-50 text-blue-700 border border-blue-200" : "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                            )}
+                          >
+                            {c.channel || "whatsapp"}
+                          </span>
                           {c.contact_tag !== "new_lead" ? (
                             <ContactTagBadge tag={c.contact_tag} />
                           ) : null}
@@ -174,11 +226,9 @@ export default async function ConversationsPage(props: { searchParams: Promise<a
                           ) : null}
                         </span>
                       </span>
-                      {c.customer_name ? (
-                        <span className="block truncate font-mono text-[10px] text-muted-foreground">
-                          {c.customer_number}
-                        </span>
-                      ) : null}
+                      <span className="block truncate font-mono text-[10px] text-muted-foreground">
+                        {c.customer_email || c.customer_number}
+                      </span>
                     </span>
                   </Link>
                 );
